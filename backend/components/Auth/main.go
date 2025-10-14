@@ -12,7 +12,7 @@ import (
 	"github.com/MicahParks/keyfunc"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/golang-jwt/jwt/v5"
+	"github.com/golang-jwt/jwt/v4"
 )
 
 var jwks *keyfunc.JWKS

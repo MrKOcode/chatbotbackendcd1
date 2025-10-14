@@ -12,6 +12,7 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/joho/godotenv"
+	"github.com/oklog/ulid/v2"
 
 	"github.com/MrKOcode/AiChatBot3.0backenddeploy/backend/components/AIChat/services"
 )
@@ -180,5 +181,5 @@ func errorResponse(status int, msg string) events.APIGatewayProxyResponse {
 }
 
 func generateULID() string {
-	return services.GenerateULID() // you can implement this helper in dynamo_dal.go if needed
+	return ulid.Make().String() // you can implement this helper in dynamo_dal.go if needed
 }

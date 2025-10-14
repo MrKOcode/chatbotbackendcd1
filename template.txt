@@ -1,0 +1,194 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Globals:
+  Function:
+    Timeout: 10
+    Runtime: provided.al2
+    MemorySize: 128
+
+Resources:
+
+  # ============ Cognito ============
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: mychatbot-user-pool
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          RequireUppercase: true
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: mychatbot-web
+      GenerateSecret: false
+      AllowedOAuthFlows: [code]
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes: [openid, email, profile]
+      CallbackURLs:
+        - http://localhost:5173/
+      LogoutURLs:
+        - http://localhost:5173/
+      SupportedIdentityProviders: [COGNITO]
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub "mychatbot-3-0-${AWS::AccountId}"
+      UserPoolId: !Ref UserPool
+
+  AdminsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: admins
+      UserPoolId: !Ref UserPool
+      Description: Admins can view all conversations
+
+  StudentsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: students
+      UserPoolId: !Ref UserPool
+      Description: Students can view only their own
+
+  # ============ API Gateway ============
+
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors:
+        AllowMethods: "'*'"
+        AllowHeaders: "'*'"
+        AllowOrigin: "'*'"
+      Auth:
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt UserPool.Arn
+        DefaultAuthorizer: CognitoAuthorizer
+
+  # ============ DynamoDB Placeholder (Phase 2) ============
+
+  ChatTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ChatMessagesTableV3
+      AttributeDefinitions:
+        - AttributeName: conversationId
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: conversationId
+          KeyType: HASH
+        - AttributeName: createdAt
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+
+  # ============ Lambda Functions ============
+
+  AIChatFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: AIChatHandler
+      Handler: main
+      CodeUri: ./components/AIChat
+      Runtime: provided.al2
+      Timeout: 30
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ChatTable
+      Environment:
+        Variables:
+          DDB_MSG_TABLE: !Ref ChatTable
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          COGNITO_USER_POOL_CLIENT_ID: !Ref UserPoolClient
+          COGNITO_ISSUER: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"
+          COGNITO_AUDIENCE: !Ref UserPoolClient
+      Events:
+        AIchatApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /api/AIchat/{proxy+}
+            Method: ANY
+
+  AuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: AuthHandler
+      Handler: main
+      CodeUri: ./components/Auth
+      Runtime: provided.al2
+      Timeout: 15
+      Environment:
+        Variables:
+          COGNITO_JWKS_URL: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}/.well-known/jwks.json"
+      Events:
+        AuthApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /api/auth/{proxy+}
+            Method: ANY
+
+
+  ChatHistoryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ChatHistoryHandler
+      Handler: main
+      CodeUri: ./components/ChatHistory
+      Runtime: provided.al2
+      Timeout: 20
+      
+         
+      Events:
+        SaveChat:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /api/chat-history/save
+            Method: POST
+        GetUserHistory:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /api/chat-history/user/{userId}
+            Method: GET
+        GetAllSummaries:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /api/chat-history/admin/users
+            Method: GET
+
+Outputs:
+  ApiEndpoint:
+    Description: HTTPS endpoint of the API
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref UserPool
+
+  UserPoolClientId:
+    Description: Cognito App Client ID
+    Value: !Ref UserPoolClient
+
+  HostedUiBaseUrl:
+    Description: Cognito Hosted UI base url
+    Value: !Sub "https://${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com"
+
+  DynamoTableName:
+    Description: DynamoDB table name for chat messages
+    Value: !Ref ChatTable
