@@ -33,36 +33,47 @@ func init() {
 }
 
 func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	// ✅ Handle CORS preflight (OPTIONS)
+	if req.HTTPMethod == "OPTIONS" {
+		return corsResponse(200, "ok"), nil
+	}
+
 	authHeader := req.Headers["Authorization"]
 	if authHeader == "" {
-		return response(http.StatusUnauthorized, "Missing Authorization header"), nil
+		return corsResponse(http.StatusUnauthorized, "Missing Authorization header"), nil
 	}
 
 	tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
 	token, err := jwt.Parse(tokenStr, jwks.Keyfunc)
 	if err != nil || !token.Valid {
-		return response(http.StatusUnauthorized, "Invalid token"), nil
+		return corsResponse(http.StatusUnauthorized, "Invalid token"), nil
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		return response(http.StatusInternalServerError, "Invalid claims"), nil
+		return corsResponse(http.StatusInternalServerError, "Invalid claims"), nil
 	}
 
 	// You can access specific fields like:
 	sub := claims["sub"]
 	email := claims["email"]
-	// Return these as confirmation
 	msg := fmt.Sprintf("Authenticated: sub=%v, email=%v", sub, email)
 
-	return response(http.StatusOK, msg), nil
+	return corsResponse(http.StatusOK, msg), nil
 }
 
-func response(status int, msg string) events.APIGatewayProxyResponse {
+// ✅ Add CORS headers
+func corsResponse(status int, msg string) events.APIGatewayProxyResponse {
 	return events.APIGatewayProxyResponse{
 		StatusCode: status,
 		Body:       msg,
+		Headers: map[string]string{
+			"Content-Type":                 "application/json",
+			"Access-Control-Allow-Origin":  "*",
+			"Access-Control-Allow-Methods": "OPTIONS,POST,GET",
+			"Access-Control-Allow-Headers": "Content-Type,Authorization",
+		},
 	}
 }
 
