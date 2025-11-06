@@ -7,3 +7,4 @@ s3_prefix = "MyChatbot3backend"
 region = "us-west-2"
 capabilities = "CAPABILITY_IAM"
 image_repositories = []
+confirm_changeset = true

@@ -142,6 +142,9 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /api/auth/{proxy+}
             Method: ANY
+            Auth:
+             Authorizer: None
+
 
 # ============ Outputs ============
 
@@ -165,3 +168,26 @@ Outputs:
   DynamoTableName:
     Description: DynamoDB table name for chat messages
     Value: !Ref ChatTable
+    
+  GatewayResponseDefault4xx:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref RestApi
+      ResponseType: DEFAULT_4XX
+      StatusCode: '400'
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'*'"
+
+  GatewayResponseDefault5xx:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref RestApi
+      ResponseType: DEFAULT_5XX
+      StatusCode: '500'
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'*'"
+
