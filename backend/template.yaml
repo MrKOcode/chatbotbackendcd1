@@ -10,17 +10,18 @@ Globals:
 Resources:
 
   # ============ Cognito ============
+
   AutoConfirmFunction:
-  Type: AWS::Serverless::Function
-  Properties:
-    FunctionName: AutoConfirmHandler
-    Handler: index.lambda_handler
-    Runtime: python3.12
-    InlineCode: |
-      def lambda_handler(event, context):
-          event['response']['autoConfirmUser'] = True
-          event['response']['autoVerifyEmail'] = True
-          return event
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: AutoConfirmHandler
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      InlineCode: |
+        def lambda_handler(event, context):
+            event['response']['autoConfirmUser'] = True
+            event['response']['autoVerifyEmail'] = True
+            return event
 
   UserPool:
     Type: AWS::Cognito::UserPool
@@ -28,13 +29,16 @@ Resources:
       UserPoolName: mychatbot-user-pool
       UsernameAttributes: [email]
       AutoVerifiedAttributes: [email]
-      Policies:
-        PasswordPolicy:
-          MinimumLength: 8
-          RequireLowercase: true
-          RequireNumbers: true
-          RequireSymbols: false
-          RequireUppercase: true
+      LambdaConfig:
+        PreSignUp: !GetAtt AutoConfirmFunction.Arn
+
+  AutoConfirmPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref AutoConfirmFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt UserPool.Arn
 
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
@@ -135,8 +139,6 @@ Resources:
 
   # ============ Lambda: Auth ============
 
-    # ============ Lambda: Auth ============
-
   AuthFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -156,9 +158,10 @@ Resources:
             Path: /api/auth/{proxy+}
             Method: ANY
             Auth:
-              Authorizer: NONE   # ✅ Correct indentation + spelling
+              Authorizer: NONE   # disable Cognito auth for this function
 
-    
+  # ============ Gateway Default Responses ============
+
   GatewayResponseDefault4xx:
     Type: AWS::ApiGateway::GatewayResponse
     Properties:
@@ -180,9 +183,6 @@ Resources:
         gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
         gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
         gatewayresponse.header.Access-Control-Allow-Methods: "'*'"
-
-
-
 
 # ============ Outputs ============
 
@@ -206,4 +206,3 @@ Outputs:
   DynamoTableName:
     Description: DynamoDB table name for chat messages
     Value: !Ref ChatTable
-    
