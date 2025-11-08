@@ -55,12 +55,11 @@ func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.API
 		return corsResponse(http.StatusInternalServerError, "Invalid claims"), nil
 	}
 
-	// You can access specific fields like:
 	sub := claims["sub"]
 	email := claims["email"]
-	msg := fmt.Sprintf("Authenticated: sub=%v, email=%v", sub, email)
-
-	return corsResponse(http.StatusOK, msg), nil
+	body := fmt.Sprintf("Authenticated: sub=%v, email=%v", sub, email)
+	// ✅ Normal success uses response() (includes same CORS headers)
+	return response(http.StatusOK, body), nil
 }
 
 // ✅ Add CORS headers
@@ -73,6 +72,19 @@ func corsResponse(status int, msg string) events.APIGatewayProxyResponse {
 			"Access-Control-Allow-Origin":  "*",
 			"Access-Control-Allow-Methods": "OPTIONS,POST,GET",
 			"Access-Control-Allow-Headers": "Content-Type,Authorization",
+		},
+	}
+}
+
+func response(status int, msg string) events.APIGatewayProxyResponse {
+	return events.APIGatewayProxyResponse{
+		StatusCode: status,
+		Body:       msg,
+		Headers: map[string]string{
+			"Access-Control-Allow-Origin":  "*",
+			"Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+			"Access-Control-Allow-Headers": "Content-Type,Authorization",
+			"Content-Type":                 "application/json",
 		},
 	}
 }

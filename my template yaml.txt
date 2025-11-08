@@ -76,7 +76,7 @@ Resources:
             UserPoolArn: !GetAtt UserPool.Arn
         DefaultAuthorizer: CognitoAuthorizer
 
-  # ============ DynamoDB Placeholder (Phase 2) ============
+  # ============ DynamoDB (Active) ============
 
   ChatTable:
     Type: AWS::DynamoDB::Table
@@ -94,7 +94,7 @@ Resources:
           KeyType: RANGE
       BillingMode: PAY_PER_REQUEST
 
-  # ============ Lambda Functions ============
+  # ============ Lambda: AIChat ============
 
   AIChatFunction:
     Type: AWS::Serverless::Function
@@ -109,7 +109,7 @@ Resources:
             TableName: !Ref ChatTable
       Environment:
         Variables:
-          DDB_MSG_TABLE: !Ref ChatTable
+          TABLE_NAME: !Ref ChatTable
           COGNITO_USER_POOL_ID: !Ref UserPool
           COGNITO_USER_POOL_CLIENT_ID: !Ref UserPoolClient
           COGNITO_ISSUER: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"
@@ -121,6 +121,10 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /api/AIchat/{proxy+}
             Method: ANY
+
+  # ============ Lambda: Auth ============
+
+    # ============ Lambda: Auth ============
 
   AuthFunction:
     Type: AWS::Serverless::Function
@@ -140,37 +144,36 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /api/auth/{proxy+}
             Method: ANY
+            Auth:
+              Authorizer: NONE   # ✅ Correct indentation + spelling
 
-
-  ChatHistoryFunction:
-    Type: AWS::Serverless::Function
+    
+  GatewayResponseDefault4xx:
+    Type: AWS::ApiGateway::GatewayResponse
     Properties:
-      FunctionName: ChatHistoryHandler
-      Handler: main
-      CodeUri: ./components/ChatHistory
-      Runtime: provided.al2
-      Timeout: 20
-      
-         
-      Events:
-        SaveChat:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /api/chat-history/save
-            Method: POST
-        GetUserHistory:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /api/chat-history/user/{userId}
-            Method: GET
-        GetAllSummaries:
-          Type: Api
-          Properties:
-            RestApiId: !Ref RestApi
-            Path: /api/chat-history/admin/users
-            Method: GET
+      RestApiId: !Ref RestApi
+      ResponseType: DEFAULT_4XX
+      StatusCode: '400'
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'*'"
+
+  GatewayResponseDefault5xx:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref RestApi
+      ResponseType: DEFAULT_5XX
+      StatusCode: '500'
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'*'"
+
+
+
+
+# ============ Outputs ============
 
 Outputs:
   ApiEndpoint:
@@ -192,3 +195,4 @@ Outputs:
   DynamoTableName:
     Description: DynamoDB table name for chat messages
     Value: !Ref ChatTable
+    
