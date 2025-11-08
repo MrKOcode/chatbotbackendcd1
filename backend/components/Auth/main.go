@@ -68,10 +68,10 @@ func corsResponse(status int, msg string) events.APIGatewayProxyResponse {
 		StatusCode: status,
 		Body:       msg,
 		Headers: map[string]string{
-			"Content-Type":                 "application/json",
 			"Access-Control-Allow-Origin":  "*",
-			"Access-Control-Allow-Methods": "OPTIONS,POST,GET",
+			"Access-Control-Allow-Methods": "OPTIONS,GET,POST,PUT,DELETE",
 			"Access-Control-Allow-Headers": "Content-Type,Authorization",
+			"Content-Type":                 "application/json",
 		},
 	}
 }
@@ -82,7 +82,7 @@ func response(status int, msg string) events.APIGatewayProxyResponse {
 		Body:       msg,
 		Headers: map[string]string{
 			"Access-Control-Allow-Origin":  "*",
-			"Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+			"Access-Control-Allow-Methods": "OPTIONS,GET,POST,PUT,DELETE",
 			"Access-Control-Allow-Headers": "Content-Type,Authorization",
 			"Content-Type":                 "application/json",
 		},

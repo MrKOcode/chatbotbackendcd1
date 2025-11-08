@@ -26,6 +26,9 @@ func main() {
 }
 
 func handler(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	if req.HTTPMethod == "OPTIONS" {
+		return corsResponse(200, "ok"), nil
+	}
 	switch req.HTTPMethod {
 	case "GET":
 		if req.Path == "/api/AIchat/conversations" {
@@ -172,7 +175,12 @@ func jsonResponse(status int, data interface{}) events.APIGatewayProxyResponse {
 	return events.APIGatewayProxyResponse{
 		StatusCode: status,
 		Body:       string(body),
-		Headers:    map[string]string{"Content-Type": "application/json"},
+		Headers: map[string]string{
+			"Content-Type":                 "application/json",
+			"Access-Control-Allow-Origin":  "*",
+			"Access-Control-Allow-Methods": "OPTIONS,GET,POST,PUT,DELETE",
+			"Access-Control-Allow-Headers": "Content-Type,Authorization",
+		},
 	}
 }
 
@@ -182,4 +190,18 @@ func errorResponse(status int, msg string) events.APIGatewayProxyResponse {
 
 func generateULID() string {
 	return ulid.Make().String() // you can implement this helper in dynamo_dal.go if needed
+}
+
+// handle CORS preflight
+func corsResponse(status int, msg string) events.APIGatewayProxyResponse {
+	return events.APIGatewayProxyResponse{
+		StatusCode: status,
+		Body:       msg,
+		Headers: map[string]string{
+			"Content-Type":                 "application/json",
+			"Access-Control-Allow-Origin":  "*",
+			"Access-Control-Allow-Methods": "OPTIONS,GET,POST,PUT,DELETE",
+			"Access-Control-Allow-Headers": "Content-Type,Authorization",
+		},
+	}
 }
