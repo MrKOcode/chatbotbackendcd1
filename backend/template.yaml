@@ -82,14 +82,49 @@ Resources:
     Properties:
       StageName: Prod
       Cors:
-        AllowMethods: "'*'"
-        AllowHeaders: "'*'"
+        AllowMethods: "'OPTIONS,GET,POST,PUT,DELETE'"
+        AllowHeaders: "'Content-Type,Authorization'"
         AllowOrigin: "'*'"
       Auth:
         Authorizers:
           CognitoAuthorizer:
             UserPoolArn: !GetAtt UserPool.Arn
         DefaultAuthorizer: CognitoAuthorizer
+      DefinitionBody:
+        swagger: "2.0"
+        info:
+          title: "MyChatbot API"
+        paths:
+          /api/AIchat/{proxy+}:
+            options:
+              security: []
+              consumes:
+                - application/json
+              produces:
+                - application/json
+              responses:
+                '200':
+                  description: "CORS response"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string
+                    Access-Control-Allow-Headers:
+                      type: string
+                    Access-Control-Allow-Methods:
+                      type: string
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates:
+                  application/json: "{\"statusCode\": 200}"
+                responses:
+                  default:
+                    statusCode: '200'
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                      method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+                      method.response.header.Access-Control-Allow-Methods: "'OPTIONS,GET,POST,PUT,DELETE'"
+                    responseTemplates:
+                      application/json: "{}"
 
   # ============ DynamoDB (Active) ============
 
@@ -158,7 +193,7 @@ Resources:
             Path: /api/auth/{proxy+}
             Method: ANY
             Auth:
-              Authorizer: NONE   # disable Cognito auth for this function
+              Authorizer: NONE
 
   # ============ Gateway Default Responses ============
 
@@ -183,6 +218,30 @@ Resources:
         gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
         gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
         gatewayresponse.header.Access-Control-Allow-Methods: "'*'"
+  GatewayResponseAccessDenied:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref RestApi
+      ResponseType: ACCESS_DENIED
+      StatusCode: '403'
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'*'"
+
+  GatewayResponseUnauthorized:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref RestApi
+      ResponseType: UNAUTHORIZED
+      StatusCode: '401'
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'*'"
+
+  
+
 
 # ============ Outputs ============
 

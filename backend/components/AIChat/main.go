@@ -29,23 +29,26 @@ func handler(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse,
 	if req.HTTPMethod == "OPTIONS" {
 		return corsResponse(200, "ok"), nil
 	}
+
+	path := strings.TrimPrefix(req.Path, "/Prod")
+
 	switch req.HTTPMethod {
 	case "GET":
-		if req.Path == "/api/AIchat/conversations" {
+		if path == "/api/AIchat/conversations" {
 			return lambdaFetchConversations(req)
 		}
-		if req.Path == "/api/AIchat/history/" {
+		if path == "/api/AIchat/history/" {
 			return lambdaFetchChatHistory(req)
 		}
 	case "POST":
-		if req.Path == "/api/AIchat/conversations" {
+		if path == "/api/AIchat/conversations" {
 			return lambdaCreateConversation(req)
 		}
-		if strings.Contains(req.Path, "/messages") {
+		if strings.Contains(path, "/messages") {
 			return lambdaSendMessage(req)
 		}
 	case "DELETE":
-		if strings.Contains(req.Path, "/conversations/") {
+		if strings.Contains(path, "/conversations/") {
 			return lambdaDeleteConversation(req)
 		}
 	}
