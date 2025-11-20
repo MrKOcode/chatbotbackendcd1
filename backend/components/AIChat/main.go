@@ -30,16 +30,22 @@ func handler(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse,
 		return corsResponse(200, "ok"), nil
 	}
 
+	// Normalize stage prefix
 	path := strings.TrimPrefix(req.Path, "/Prod")
 
 	switch req.HTTPMethod {
+
 	case "GET":
 		if path == "/api/AIchat/conversations" {
 			return lambdaFetchConversations(req)
 		}
-		if path == "/api/AIchat/history/" {
+		if path == "/api/AIchat/history" {
 			return lambdaFetchChatHistory(req)
 		}
+		if strings.Contains(path, "/messages") {
+			return lambdaFetchMessages(req) // <-- you must implement this
+		}
+
 	case "POST":
 		if path == "/api/AIchat/conversations" {
 			return lambdaCreateConversation(req)
@@ -47,11 +53,13 @@ func handler(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse,
 		if strings.Contains(path, "/messages") {
 			return lambdaSendMessage(req)
 		}
+
 	case "DELETE":
 		if strings.Contains(path, "/conversations/") {
 			return lambdaDeleteConversation(req)
 		}
 	}
+
 	return errorResponse(404, "Route not found"), nil
 }
 
@@ -134,7 +142,8 @@ func lambdaSendMessage(req events.APIGatewayProxyRequest) (events.APIGatewayProx
 }
 
 func lambdaDeleteConversation(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	conversationID := strings.TrimPrefix(req.Path, "/api/AIchat/conversations/")
+	normalized := strings.TrimPrefix(req.Path, "/Prod")
+	conversationID := strings.TrimPrefix(normalized, "/api/AIchat/conversations/")
 	err := services.Store.DeleteConversationCascade(context.Background(), conversationID)
 	if err != nil {
 		return errorResponse(500, err.Error()), nil
@@ -169,6 +178,51 @@ func lambdaFetchChatHistory(req events.APIGatewayProxyRequest) (events.APIGatewa
 	}
 
 	return jsonResponse(200, map[string]interface{}{"history": history}), nil
+}
+
+func lambdaFetchMessages(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	// Extract conversationId from path
+	normalized := strings.TrimPrefix(req.Path, "/Prod")
+	// Example normalized path:
+	// /api/AIchat/conversations/123/messages
+	parts := strings.Split(normalized, "/")
+	if len(parts) < 5 {
+		return errorResponse(400, "Invalid messages path"), nil
+	}
+	conversationID := parts[3] // index 0="",1=api,2=AIchat,3=conversations,4=id
+
+	// Extract userId
+	userId := req.QueryStringParameters["userId"]
+	if userId == "" {
+		return errorResponse(400, "Missing userId"), nil
+	}
+
+	// Fetch messages from DynamoDB
+	page, err := services.Store.ListMessages(
+		context.Background(),
+		conversationID,
+		100,   // limit
+		"",    // nextToken
+		false, // newestFirst
+	)
+	if err != nil {
+		return errorResponse(500, err.Error()), nil
+	}
+
+	// Format response for frontend
+	return jsonResponse(200, map[string]interface{}{
+		"userId":         userId,
+		"conversationId": conversationID,
+		"content": map[string]interface{}{
+			"userId":         userId,
+			"conversationId": conversationID,
+			"content":        page.Items, // array of ChatMessage
+			"pagination": map[string]interface{}{
+				"hasMore":   page.NextToken != "",
+				"nextToken": page.NextToken,
+			},
+		},
+	}), nil
 }
 
 // ========== Helpers ==========
