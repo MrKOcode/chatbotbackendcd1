@@ -189,7 +189,7 @@ func lambdaFetchMessages(req events.APIGatewayProxyRequest) (events.APIGatewayPr
 	if len(parts) < 5 {
 		return errorResponse(400, "Invalid messages path"), nil
 	}
-	conversationID := parts[3] // index 0="",1=api,2=AIchat,3=conversations,4=id
+	conversationID := parts[4] // index 0="",1=api,2=AIchat,3=conversations,4=id
 
 	// Extract userId
 	userId := req.QueryStringParameters["userId"]
