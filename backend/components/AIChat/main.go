@@ -103,16 +103,25 @@ func lambdaCreateConversation(req events.APIGatewayProxyRequest) (events.APIGate
 }
 
 func lambdaFetchConversations(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	userId := req.QueryStringParameters["userId"]
-	if userId == "" {
-		return errorResponse(400, "Missing userId"), nil
+	auth, err := getAuthInfo(req)
+	if err != nil {
+		return errorResponse(401, err.Error()), nil
 	}
 
-	page, err := services.Store.ListConversations(context.Background(), userId, 20, "")
+	userID, err := resolveEffectiveUserID(req, auth)
+	if err != nil {
+		return errorResponse(403, err.Error()), nil
+	}
+
+	page, err := services.Store.ListConversations(context.Background(), userID, 20, "")
 	if err != nil {
 		return errorResponse(500, err.Error()), nil
 	}
-	return jsonResponse(200, map[string]interface{}{"content": map[string]interface{}{"data": page.Items}}), nil
+	return jsonResponse(200, map[string]interface{}{
+		"content": map[string]interface{}{
+			"data": page.Items,
+		},
+	}), nil
 }
 
 func lambdaSendMessage(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
