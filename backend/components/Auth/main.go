@@ -32,6 +32,22 @@ func init() {
 	}
 }
 
+func toJSONStringArray(in []string) string {
+	if len(in) == 0 {
+		return "[]"
+	}
+	var b strings.Builder
+	b.WriteString("[")
+	for i, s := range in {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(fmt.Sprintf("%q", s))
+	}
+	b.WriteString("]")
+	return b.String()
+}
+
 func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 	// ✅ Handle CORS preflight (OPTIONS)
 	if req.HTTPMethod == "OPTIONS" {
@@ -57,8 +73,28 @@ func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.API
 
 	sub := claims["sub"]
 	email := claims["email"]
-	body := fmt.Sprintf("Authenticated: sub=%v, email=%v", sub, email)
-	// ✅ Normal success uses response() (includes same CORS headers)
+	// cognito:groups is usually []interface{} when parsed from JWT
+	var groups []string
+	if raw, ok := claims["cognito:groups"].([]interface{}); ok {
+		for _, g := range raw {
+			if s, ok := g.(string); ok {
+				groups = append(groups, s)
+			}
+		}
+	}
+
+	role := "student"
+	for _, g := range groups {
+		if g == "admins" {
+			role = "admin"
+			break
+		}
+	}
+
+	body := fmt.Sprintf(`{"userId":%q,"email":%q,"role":%q,"groups":%s}`,
+		sub, email, role, toJSONStringArray(groups),
+	)
+
 	return response(http.StatusOK, body), nil
 }
 
