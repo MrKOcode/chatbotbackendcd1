@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -66,12 +67,18 @@ func handler(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse,
 // ========== Handlers ==========
 
 func lambdaCreateConversation(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	var body struct {
-		UserID string `json:"userId"`
+	auth, err := getAuthInfo(req)
+	if err != nil {
+		return errorResponse(401, err.Error()), nil
 	}
-	_ = json.Unmarshal([]byte(req.Body), &body)
 
-	id, err := services.Store.CreateConversation(context.Background(), body.UserID, "New Academic Chat")
+	// normal users create for themselves; admins also create for themselves unless targetUserId is explicitly provided
+	userID, err := resolveEffectiveUserID(req, auth)
+	if err != nil {
+		return errorResponse(403, err.Error()), nil
+	}
+
+	id, err := services.Store.CreateConversation(context.Background(), userID, "New Academic Chat")
 	if err != nil {
 		return errorResponse(500, err.Error()), nil
 	}
@@ -80,7 +87,7 @@ func lambdaCreateConversation(req events.APIGatewayProxyRequest) (events.APIGate
 	err = services.Store.PutMessage(context.Background(), services.ChatMessage{
 		ID:             generateULID(),
 		ConversationID: id,
-		UserID:         body.UserID,
+		UserID:         userID,
 		Role:           "chatbot",
 		Content:        greeting,
 		CreatedAt:      time.Now().UTC(),
@@ -223,6 +230,79 @@ func lambdaFetchMessages(req events.APIGatewayProxyRequest) (events.APIGatewayPr
 			},
 		},
 	}), nil
+}
+
+type AuthInfo struct {
+	Sub     string
+	IsAdmin bool
+	Groups  []string
+}
+
+// Works with REST API + Cognito Authorizer where claims are in req.RequestContext.Authorizer["claims"]
+func getAuthInfo(req events.APIGatewayProxyRequest) (AuthInfo, error) {
+	a := AuthInfo{}
+
+	rawClaims, ok := req.RequestContext.Authorizer["claims"]
+	if !ok || rawClaims == nil {
+		return a, errors.New("missing authorizer claims (check API Gateway authorizer config)")
+	}
+
+	claims, ok := rawClaims.(map[string]interface{})
+	if !ok {
+		return a, errors.New("invalid claims type")
+	}
+
+	// sub
+	if v, ok := claims["sub"]; ok {
+		if s, ok := v.(string); ok && s != "" {
+			a.Sub = s
+		}
+	}
+	if a.Sub == "" {
+		return a, errors.New("missing sub claim")
+	}
+
+	// groups: often a string like "admins,students" in REST API authorizer claims
+	if v, ok := claims["cognito:groups"]; ok && v != nil {
+		switch t := v.(type) {
+		case string:
+			for _, g := range strings.Split(t, ",") {
+				g = strings.TrimSpace(g)
+				if g != "" {
+					a.Groups = append(a.Groups, g)
+				}
+			}
+		case []interface{}:
+			for _, it := range t {
+				if s, ok := it.(string); ok && s != "" {
+					a.Groups = append(a.Groups, s)
+				}
+			}
+		}
+	}
+
+	for _, g := range a.Groups {
+		if g == "admins" {
+			a.IsAdmin = true
+			break
+		}
+	}
+
+	return a, nil
+}
+
+// Decide which userId to operate on.
+// - Normal user: always their own sub
+// - Admin: can pass targetUserId (query param) to view other users
+func resolveEffectiveUserID(req events.APIGatewayProxyRequest, auth AuthInfo) (string, error) {
+	target := strings.TrimSpace(req.QueryStringParameters["targetUserId"])
+	if target == "" {
+		return auth.Sub, nil
+	}
+	if !auth.IsAdmin {
+		return "", errors.New("forbidden: targetUserId is admin-only")
+	}
+	return target, nil
 }
 
 // ========== Helpers ==========
