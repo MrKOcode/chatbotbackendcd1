@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"sort"
 	"time"
@@ -213,7 +214,7 @@ func (d *dynamoDAL) ListMessages(ctx context.Context, conversationID string, lim
 	return ListPage[ChatMessage]{Items: items, NextToken: token}, nil
 }
 
-func (d *dynamoDAL) DeleteConversationCascade(ctx context.Context, conversationID string) error {
+func (d *dynamoDAL) DeleteConversationCascade(ctx context.Context, userID, conversationID string) error {
 	// Query all PK=CONV#id and batch delete
 	var lek map[string]types.AttributeValue
 	for {
@@ -261,14 +262,16 @@ func (d *dynamoDAL) DeleteConversationCascade(ctx context.Context, conversationI
 		}
 		lek = out.LastEvaluatedKey
 	}
-	// Also delete the conversation header item (USER#sub, SK=CONV#id)
-	_, _ = d.client.DeleteItem(ctx, &ddb.DeleteItemInput{
+	_, err := d.client.DeleteItem(ctx, &ddb.DeleteItemInput{
 		TableName: aws.String(d.table),
 		Key: map[string]types.AttributeValue{
-			"PK": &types.AttributeValueMemberS{Value: pkUser("")}, // not known here
+			"PK": &types.AttributeValueMemberS{Value: pkUser(userID)},
 			"SK": &types.AttributeValueMemberS{Value: skConv(conversationID)},
 		},
 	})
+	if err != nil {
+		return err
+	}
 	// Note: To delete the header, you need userID; do this delete in handler where you have the userID.
 	return nil
 }
@@ -335,4 +338,29 @@ func parseMessageID(skOrGsi1sk string) string {
 	_ = parts
 	// simplest: not needed by callers right now; return ""
 	return ""
+}
+
+func (d *dynamoDAL) GetConversation(ctx context.Context, userID, conversationID string) (Conversation, error) {
+	out, err := d.client.GetItem(ctx, &ddb.GetItemInput{
+		TableName: aws.String(d.table),
+		Key: map[string]types.AttributeValue{
+			"PK": &types.AttributeValueMemberS{Value: pkUser(userID)},
+			"SK": &types.AttributeValueMemberS{Value: skConv(conversationID)},
+		},
+		ConsistentRead: aws.Bool(true),
+	})
+	if err != nil {
+		return Conversation{}, err
+	}
+	if out.Item == nil || len(out.Item) == 0 {
+		return Conversation{}, fmt.Errorf("conversation not found")
+	}
+
+	// optional: you can check entityType == "Conversation" if you want
+	return Conversation{
+		ID:        attrS(out.Item, "conversationId"),
+		UserID:    attrS(out.Item, "userId"),
+		Title:     attrS(out.Item, "title"),
+		CreatedAt: parseTime(attrS(out.Item, "createdAt")),
+	}, nil
 }

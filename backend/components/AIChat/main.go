@@ -125,43 +125,82 @@ func lambdaFetchConversations(req events.APIGatewayProxyRequest) (events.APIGate
 }
 
 func lambdaSendMessage(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	auth, err := getAuthInfo(req)
+	if err != nil {
+		return errorResponse(401, err.Error()), nil
+	}
+
+	userID, err := resolveEffectiveUserID(req, auth)
+	if err != nil {
+		return errorResponse(403, err.Error()), nil
+	}
+
 	var body struct {
-		UserID  string               `json:"userId"`
 		Message services.ChatMessage `json:"message"`
 	}
 	_ = json.Unmarshal([]byte(req.Body), &body)
+
+	if body.Message.ConversationID == "" {
+		return errorResponse(400, "Missing conversationId"), nil
+	}
+	if strings.TrimSpace(body.Message.Content) == "" {
+		return errorResponse(400, "Missing message content"), nil
+	}
 
 	now := time.Now().UTC()
 	userMsg := services.ChatMessage{
 		ID:             generateULID(),
 		ConversationID: body.Message.ConversationID,
-		UserID:         body.UserID,
+		UserID:         userID,
 		Role:           "user",
 		Content:        body.Message.Content,
 		CreatedAt:      now,
 	}
-	_ = services.Store.PutMessage(context.Background(), userMsg)
+	if err := services.Store.PutMessage(context.Background(), userMsg); err != nil {
+		return errorResponse(500, err.Error()), nil
+	}
 
 	// Simulated reply for now
 	botReply := fmt.Sprintf("You said: %s", body.Message.Content)
 	botMsg := services.ChatMessage{
 		ID:             generateULID(),
 		ConversationID: body.Message.ConversationID,
-		UserID:         body.UserID,
+		UserID:         userID,
 		Role:           "chatbot",
 		Content:        botReply,
 		CreatedAt:      now.Add(time.Millisecond),
 	}
-	_ = services.Store.PutMessage(context.Background(), botMsg)
+	if err := services.Store.PutMessage(context.Background(), botMsg); err != nil {
+		return errorResponse(500, err.Error()), nil
+	}
 
 	return jsonResponse(200, map[string]string{"response": botReply}), nil
 }
 
 func lambdaDeleteConversation(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	auth, err := getAuthInfo(req)
+	if err != nil {
+		return errorResponse(401, err.Error()), nil
+	}
+
 	normalized := strings.TrimPrefix(req.Path, "/Prod")
 	conversationID := strings.TrimPrefix(normalized, "/api/AIchat/conversations/")
-	err := services.Store.DeleteConversationCascade(context.Background(), conversationID)
+	if conversationID == "" {
+		return errorResponse(400, "Missing conversationId"), nil
+	}
+
+	userID, err := resolveEffectiveUserID(req, auth)
 	if err != nil {
+		return errorResponse(403, err.Error()), nil
+	}
+
+	// Ownership check
+	if _, err := services.Store.GetConversation(context.Background(), userID, conversationID); err != nil {
+		return errorResponse(403, "Forbidden"), nil
+	}
+
+	ctx := context.Background()
+	if err := services.Store.DeleteConversationCascade(ctx, userID, conversationID); err != nil {
 		return errorResponse(500, err.Error()), nil
 	}
 	return jsonResponse(200, map[string]string{"conversationId": conversationID}), nil
@@ -197,42 +236,51 @@ func lambdaFetchChatHistory(req events.APIGatewayProxyRequest) (events.APIGatewa
 }
 
 func lambdaFetchMessages(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	auth, err := getAuthInfo(req)
+	if err != nil {
+		return errorResponse(401, err.Error()), nil
+	}
+
 	// Extract conversationId from path
 	normalized := strings.TrimPrefix(req.Path, "/Prod")
-	// Example normalized path:
-	// /api/AIchat/conversations/123/messages
 	parts := strings.Split(normalized, "/")
-	if len(parts) < 5 {
+	if len(parts) < 6 {
 		return errorResponse(400, "Invalid messages path"), nil
 	}
-	conversationID := parts[4] // index 0="",1=api,2=AIchat,3=conversations,4=id
-
-	// Extract userId
-	userId := req.QueryStringParameters["userId"]
-	if userId == "" {
-		return errorResponse(400, "Missing userId"), nil
+	// /api/AIchat/conversations/{id}/messages
+	conversationID := parts[4]
+	if conversationID == "" {
+		return errorResponse(400, "Missing conversationId"), nil
 	}
 
-	// Fetch messages from DynamoDB
+	// Determine which user we are operating on (admin can pass targetUserId)
+	userID, err := resolveEffectiveUserID(req, auth)
+	if err != nil {
+		return errorResponse(403, err.Error()), nil
+	}
+
+	// SECURITY CHECK: confirm this conversation belongs to userID.
+	// Uses your existing DAL method (returns error if not found / not owned).
+	if _, err := services.Store.GetConversation(context.Background(), userID, conversationID); err != nil {
+		// treat as forbidden to avoid leaking existence
+		return errorResponse(403, "Forbidden"), nil
+	}
+
 	page, err := services.Store.ListMessages(
 		context.Background(),
 		conversationID,
-		100,   // limit
-		"",    // nextToken
-		false, // newestFirst
+		100,
+		"",
+		false,
 	)
 	if err != nil {
 		return errorResponse(500, err.Error()), nil
 	}
 
-	// Format response for frontend
 	return jsonResponse(200, map[string]interface{}{
-		"userId":         userId,
-		"conversationId": conversationID,
 		"content": map[string]interface{}{
-			"userId":         userId,
 			"conversationId": conversationID,
-			"content":        page.Items, // array of ChatMessage
+			"content":        page.Items,
 			"pagination": map[string]interface{}{
 				"hasMore":   page.NextToken != "",
 				"nextToken": page.NextToken,
