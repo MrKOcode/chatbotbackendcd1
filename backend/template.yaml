@@ -164,31 +164,49 @@ Resources:
 
   # ============ Gateway Default Responses ============
 
-  GatewayResponses:
-  DEFAULT_4XX:
-    ResponseParameters:
-      Headers:
-        Access-Control-Allow-Origin: "'http://mychatbot-frontend3-0.s3-website-us-west-2.amazonaws.com'"
-        Access-Control-Allow-Headers: "'Content-Type,Authorization'"
-        Access-Control-Allow-Methods: "'OPTIONS,GET,POST,PUT,DELETE'"
-  DEFAULT_5XX:
-    ResponseParameters:
-      Headers:
-        Access-Control-Allow-Origin: "'http://mychatbot-frontend3-0.s3-website-us-west-2.amazonaws.com'"
-        Access-Control-Allow-Headers: "'Content-Type,Authorization'"
-        Access-Control-Allow-Methods: "'OPTIONS,GET,POST,PUT,DELETE'"
-  UNAUTHORIZED:
-    ResponseParameters:
-      Headers:
-        Access-Control-Allow-Origin: "'http://mychatbot-frontend3-0.s3-website-us-west-2.amazonaws.com'"
-        Access-Control-Allow-Headers: "'Content-Type,Authorization'"
-        Access-Control-Allow-Methods: "'OPTIONS,GET,POST,PUT,DELETE'"
-  ACCESS_DENIED:
-    ResponseParameters:
-      Headers:
-        Access-Control-Allow-Origin: "'http://mychatbot-frontend3-0.s3-website-us-west-2.amazonaws.com'"
-        Access-Control-Allow-Headers: "'Content-Type,Authorization'"
-        Access-Control-Allow-Methods: "'OPTIONS,GET,POST,PUT,DELETE'"
+  GatewayResponseDefault4xx:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref RestApi
+      ResponseType: DEFAULT_4XX
+      StatusCode: '400'
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'http://mychatbot-frontend3-0.s3-website-us-west-2.amazonaws.com'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'OPTIONS,GET,POST,PUT,DELETE'"
+
+  GatewayResponseDefault5xx:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref RestApi
+      ResponseType: DEFAULT_5XX
+      StatusCode: '500'
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'http://mychatbot-frontend3-0.s3-website-us-west-2.amazonaws.com'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'OPTIONS,GET,POST,PUT,DELETE'"
+
+  GatewayResponseUnauthorized:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref RestApi
+      ResponseType: UNAUTHORIZED
+      StatusCode: '401'
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'http://mychatbot-frontend3-0.s3-website-us-west-2.amazonaws.com'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'OPTIONS,GET,POST,PUT,DELETE'"
+
+  GatewayResponseAccessDenied:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref RestApi
+      ResponseType: ACCESS_DENIED
+      StatusCode: '403'
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'http://mychatbot-frontend3-0.s3-website-us-west-2.amazonaws.com'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'OPTIONS,GET,POST,PUT,DELETE'"
   
 
 

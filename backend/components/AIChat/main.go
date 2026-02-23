@@ -207,17 +207,31 @@ func lambdaDeleteConversation(req events.APIGatewayProxyRequest) (events.APIGate
 }
 
 func lambdaFetchChatHistory(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	userId := req.QueryStringParameters["userId"]
-	if userId == "" {
-		return errorResponse(400, "Missing userId"), nil
+	auth, err := getAuthInfo(req)
+	if err != nil {
+		return errorResponse(401, err.Error()), nil
 	}
-	page, err := services.Store.ListUserMessagesSince(context.Background(), userId, time.Now().Add(-24*time.Hour), 50, "")
+
+	// Normal user -> auth.Sub; Admin -> can override with ?targetUserId=...
+	userID, err := resolveEffectiveUserID(req, auth)
+	if err != nil {
+		return errorResponse(403, err.Error()), nil
+	}
+
+	page, err := services.Store.ListUserMessagesSince(
+		context.Background(),
+		userID,
+		time.Now().Add(-24*time.Hour),
+		50,
+		"",
+	)
 	if err != nil {
 		return errorResponse(500, err.Error()), nil
 	}
 
 	var history []map[string]string
 	msgs := page.Items
+
 	for i := 0; i < len(msgs)-1; i++ {
 		if msgs[i].Role == "user" && msgs[i+1].Role == "chatbot" && msgs[i].ConversationID == msgs[i+1].ConversationID {
 			history = append(history, map[string]string{
@@ -225,7 +239,7 @@ func lambdaFetchChatHistory(req events.APIGatewayProxyRequest) (events.APIGatewa
 				"response":    msgs[i+1].Content,
 				"timestamp":   msgs[i+1].CreatedAt.Format(time.RFC3339),
 			})
-			i++ // skip the bot response in next loop
+			i++
 		}
 		if len(history) == 5 {
 			break
@@ -371,7 +385,7 @@ func jsonResponse(status int, data interface{}) events.APIGatewayProxyResponse {
 		Body:       string(body),
 		Headers: map[string]string{
 			"Content-Type":                 "application/json",
-			"Access-Control-Allow-Origin":  "*",
+			"Access-Control-Allow-Origin":  "http://mychatbot-frontend3-0.s3-website-us-west-2.amazonaws.com",
 			"Access-Control-Allow-Methods": "OPTIONS,GET,POST,PUT,DELETE",
 			"Access-Control-Allow-Headers": "Content-Type,Authorization",
 		},
@@ -393,7 +407,7 @@ func corsResponse(status int, msg string) events.APIGatewayProxyResponse {
 		Body:       msg,
 		Headers: map[string]string{
 			"Content-Type":                 "application/json",
-			"Access-Control-Allow-Origin":  "*",
+			"Access-Control-Allow-Origin":  "http://mychatbot-frontend3-0.s3-website-us-west-2.amazonaws.com",
 			"Access-Control-Allow-Methods": "OPTIONS,GET,POST,PUT,DELETE",
 			"Access-Control-Allow-Headers": "Content-Type,Authorization",
 		},
