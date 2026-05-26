@@ -322,7 +322,7 @@ func attrS(m map[string]types.AttributeValue, k string) string {
 	return ""
 }
 func toEpochMs(t time.Time) string {
-	return aws.ToString(aws.String((time.Duration(t.UnixNano() / 1e6)).String()))
+	return fmt.Sprintf("%d", t.UnixMilli())
 }
 func parseTime(s string) time.Time {
 	if s == "" {

@@ -98,7 +98,7 @@ Resources:
   ChatTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: ChatMessagesTableV3
+      TableName: ChatMessagesTableV4
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: PK
