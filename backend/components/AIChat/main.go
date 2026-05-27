@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -33,6 +32,7 @@ func handler(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse,
 
 	// Normalize stage prefix
 	path := strings.TrimPrefix(req.Path, "/Prod")
+	path = strings.TrimSuffix(path, "/")
 
 	switch req.HTTPMethod {
 
@@ -161,7 +161,10 @@ func lambdaSendMessage(req events.APIGatewayProxyRequest) (events.APIGatewayProx
 	}
 
 	// Simulated reply for now
-	botReply := fmt.Sprintf("You said: %s", body.Message.Content)
+	botReply, err := services.GetChatGPTResponse(body.Message.Content)
+	if err != nil {
+		return errorResponse(500, "Failed to get AI response: "+err.Error()), nil
+	}
 	botMsg := services.ChatMessage{
 		ID:             generateULID(),
 		ConversationID: body.Message.ConversationID,
@@ -174,7 +177,10 @@ func lambdaSendMessage(req events.APIGatewayProxyRequest) (events.APIGatewayProx
 		return errorResponse(500, err.Error()), nil
 	}
 
-	return jsonResponse(200, map[string]string{"response": botReply}), nil
+	return jsonResponse(200, map[string]interface{}{
+		"message":  userMsg,
+		"response": botMsg,
+	}), nil
 }
 
 func lambdaDeleteConversation(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
