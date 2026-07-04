@@ -144,6 +144,7 @@ Resources:
           COGNITO_USER_POOL_CLIENT_ID: !Ref UserPoolClient
           COGNITO_ISSUER: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"
           COGNITO_AUDIENCE: !Ref UserPoolClient
+          OPENAI_API_KEY: "{{resolve:secretsmanager:mychatbot/openai:SecretString:OPENAI_API_KEY}}"
       Events:
         AIchatApi:
           Type: Api
