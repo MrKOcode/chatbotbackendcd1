@@ -146,6 +146,9 @@ func lambdaSendMessage(req events.APIGatewayProxyRequest) (events.APIGatewayProx
 	if strings.TrimSpace(body.Message.Content) == "" {
 		return errorResponse(400, "Missing message content"), nil
 	}
+	if _, err := services.Store.GetConversation(context.Background(), userID, body.Message.ConversationID); err != nil {
+		return errorResponse(403, "Forbidden"), nil
+	}
 
 	now := time.Now().UTC()
 	userMsg := services.ChatMessage{
@@ -227,7 +230,7 @@ func lambdaFetchChatHistory(req events.APIGatewayProxyRequest) (events.APIGatewa
 	page, err := services.Store.ListUserMessagesSince(
 		context.Background(),
 		userID,
-		time.Now().Add(-24*time.Hour),
+		time.Time{},
 		50,
 		"",
 	)
