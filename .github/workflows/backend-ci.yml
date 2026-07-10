@@ -1,0 +1,70 @@
+name: Backend CI
+
+on:
+  push:
+    branches:
+      - aichatbotbranch1
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/components/AIChat/go.mod
+          cache-dependency-path: |
+            backend/components/AIChat/go.sum
+            backend/components/Auth/go.sum
+
+      - name: Check AIChat formatting
+        working-directory: backend/components/AIChat
+        shell: bash
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "Unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Check Auth formatting
+        working-directory: backend/components/Auth
+        shell: bash
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "Unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Test AIChat
+        working-directory: backend/components/AIChat
+        run: go test -v ./...
+
+      - name: Test Auth
+        working-directory: backend/components/Auth
+        run: go test -v ./...
+
+      - name: Set up AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+
+      - name: Build Lambda binaries
+        working-directory: backend
+        run: |
+          chmod +x build_all.sh
+          ./build_all.sh
+
+      - name: Build SAM application
+        working-directory: backend
+        run: sam build
