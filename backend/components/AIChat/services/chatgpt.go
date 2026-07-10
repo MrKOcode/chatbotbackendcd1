@@ -43,7 +43,7 @@ func GetChatGPTResponse(message string) (string, error) {
 		}
 		return apiKey + "..."
 	}())
-	
+
 	if apiKey == "" {
 		return "", fmt.Errorf("OPENAI_API_KEY is not set in environment variables")
 	}
