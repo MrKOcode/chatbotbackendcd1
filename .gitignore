@@ -37,7 +37,6 @@ build.toml
 
 # Node modules (if applicable)
 node_modules/
-package-lock.json
 
 # Backup/Temporary files
 *~
@@ -57,4 +56,14 @@ backend/components/ChatHistory
 
 
 backend/*.tar.gz
-backend/*.tar.gz
+backend/.aws-sam/
+backend/logs
+backend/awscliv2.zip
+
+backend/.aws-sam/
+backend/components/AIChat/.env
+backend/components/AIChat/bootstrap
+backend/components/Auth/bootstrap
+backend/components/Auth/main
+backend/awscliv2.zip
+node_modules/
