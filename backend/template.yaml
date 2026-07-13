@@ -1,6 +1,38 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 
+Parameters:
+  AutoConfirmFunctionName:
+    Type: String
+    Default: AutoConfirmHandler
+  AIChatFunctionName:
+    Type: String
+    Default: AIChatHandler
+  AuthFunctionName:
+    Type: String
+    Default: AuthHandler
+  ChatTableName:
+    Type: String
+    Default: ChatMessagesTableV4
+  UserPoolName:
+    Type: String
+    Default: mychatbot-user-pool
+  UserPoolClientName:
+    Type: String
+    Default: mychatbot-web
+  CognitoDomainPrefix:
+    Type: String
+    Default: mychatbot-3-0
+  ApiStageName:
+    Type: String
+    Default: Prod
+  AllowedCorsOrigin:
+    Type: String
+    Default: http://mychatbot-frontend3-0.s3-website-us-west-2.amazonaws.com
+  OpenAISecretId:
+    Type: String
+    Default: mychatbot/openai
+
 Globals:
   Function:
     Timeout: 10
@@ -14,7 +46,7 @@ Resources:
   AutoConfirmFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: AutoConfirmHandler
+      FunctionName: !Ref AutoConfirmFunctionName
       Handler: index.lambda_handler
       Runtime: python3.12
       InlineCode: |
@@ -26,7 +58,7 @@ Resources:
   UserPool:
     Type: AWS::Cognito::UserPool
     Properties:
-      UserPoolName: mychatbot-user-pool
+      UserPoolName: !Ref UserPoolName
       UsernameAttributes: [email]
       AutoVerifiedAttributes: [email]
       LambdaConfig:
@@ -44,7 +76,7 @@ Resources:
     Type: AWS::Cognito::UserPoolClient
     Properties:
       UserPoolId: !Ref UserPool
-      ClientName: mychatbot-web
+      ClientName: !Ref UserPoolClientName
       GenerateSecret: false
       AllowedOAuthFlows: [code]
       AllowedOAuthFlowsUserPoolClient: true
@@ -58,7 +90,7 @@ Resources:
   UserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
     Properties:
-      Domain: !Sub "mychatbot-3-0-${AWS::AccountId}"
+      Domain: !Sub "${CognitoDomainPrefix}-${AWS::AccountId}"
       UserPoolId: !Ref UserPool
 
   AdminsGroup:
@@ -80,11 +112,11 @@ Resources:
   RestApi:
     Type: AWS::Serverless::Api
     Properties:
-      StageName: Prod
+      StageName: !Ref ApiStageName
       Cors:
         AllowMethods: "'OPTIONS,GET,POST,PUT,DELETE'"
         AllowHeaders: "'Content-Type,Authorization'"
-        AllowOrigin: "'http://mychatbot-frontend3-0.s3-website-us-west-2.amazonaws.com'"
+        AllowOrigin: !Sub "'${AllowedCorsOrigin}'"
       Auth:
         Authorizers:
           CognitoAuthorizer:
@@ -98,7 +130,7 @@ Resources:
   ChatTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: ChatMessagesTableV4
+      TableName: !Ref ChatTableName
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: PK
@@ -129,7 +161,7 @@ Resources:
   AIChatFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: AIChatHandler
+      FunctionName: !Ref AIChatFunctionName
       Handler: main
       CodeUri: ./components/AIChat
       Runtime: provided.al2
@@ -144,7 +176,9 @@ Resources:
           COGNITO_USER_POOL_CLIENT_ID: !Ref UserPoolClient
           COGNITO_ISSUER: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"
           COGNITO_AUDIENCE: !Ref UserPoolClient
-          OPENAI_API_KEY: "{{resolve:secretsmanager:mychatbot/openai:SecretString:OPENAI_API_KEY}}"
+          API_STAGE_NAME: !Ref ApiStageName
+          ALLOWED_ORIGIN: !Ref AllowedCorsOrigin
+          OPENAI_API_KEY: !Sub "{{resolve:secretsmanager:${OpenAISecretId}:SecretString:OPENAI_API_KEY}}"
       Events:
         AIchatApi:
           Type: Api
@@ -158,7 +192,7 @@ Resources:
   AuthFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: AuthHandler
+      FunctionName: !Ref AuthFunctionName
       Handler: main
       CodeUri: ./components/Auth
       Runtime: provided.al2
@@ -185,7 +219,7 @@ Resources:
       ResponseType: DEFAULT_4XX
       StatusCode: '400'
       ResponseParameters:
-        gatewayresponse.header.Access-Control-Allow-Origin: "'http://mychatbot-frontend3-0.s3-website-us-west-2.amazonaws.com'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigin}'"
         gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
         gatewayresponse.header.Access-Control-Allow-Methods: "'OPTIONS,GET,POST,PUT,DELETE'"
 
@@ -196,7 +230,7 @@ Resources:
       ResponseType: DEFAULT_5XX
       StatusCode: '500'
       ResponseParameters:
-        gatewayresponse.header.Access-Control-Allow-Origin: "'http://mychatbot-frontend3-0.s3-website-us-west-2.amazonaws.com'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigin}'"
         gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
         gatewayresponse.header.Access-Control-Allow-Methods: "'OPTIONS,GET,POST,PUT,DELETE'"
 
@@ -207,7 +241,7 @@ Resources:
       ResponseType: UNAUTHORIZED
       StatusCode: '401'
       ResponseParameters:
-        gatewayresponse.header.Access-Control-Allow-Origin: "'http://mychatbot-frontend3-0.s3-website-us-west-2.amazonaws.com'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigin}'"
         gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
         gatewayresponse.header.Access-Control-Allow-Methods: "'OPTIONS,GET,POST,PUT,DELETE'"
 
@@ -218,7 +252,7 @@ Resources:
       ResponseType: ACCESS_DENIED
       StatusCode: '403'
       ResponseParameters:
-        gatewayresponse.header.Access-Control-Allow-Origin: "'http://mychatbot-frontend3-0.s3-website-us-west-2.amazonaws.com'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigin}'"
         gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
         gatewayresponse.header.Access-Control-Allow-Methods: "'OPTIONS,GET,POST,PUT,DELETE'"
   
@@ -229,7 +263,7 @@ Resources:
 Outputs:
   ApiEndpoint:
     Description: HTTPS endpoint of the API
-    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}/"
 
   UserPoolId:
     Description: Cognito User Pool ID
