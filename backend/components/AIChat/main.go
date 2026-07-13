@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"time"
 
@@ -31,7 +32,7 @@ func handler(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse,
 	}
 
 	// Normalize stage prefix
-	path := strings.TrimPrefix(req.Path, "/Prod")
+	path := strings.TrimPrefix(req.Path, "/"+apiStageName())
 	path = strings.TrimSuffix(path, "/")
 
 	switch req.HTTPMethod {
@@ -192,7 +193,7 @@ func lambdaDeleteConversation(req events.APIGatewayProxyRequest) (events.APIGate
 		return errorResponse(401, err.Error()), nil
 	}
 
-	normalized := strings.TrimPrefix(req.Path, "/Prod")
+	normalized := strings.TrimPrefix(req.Path, "/"+apiStageName())
 	conversationID := strings.TrimPrefix(normalized, "/api/AIchat/conversations/")
 	if conversationID == "" {
 		return errorResponse(400, "Missing conversationId"), nil
@@ -265,7 +266,7 @@ func lambdaFetchMessages(req events.APIGatewayProxyRequest) (events.APIGatewayPr
 	}
 
 	// Extract conversationId from path
-	normalized := strings.TrimPrefix(req.Path, "/Prod")
+	normalized := strings.TrimPrefix(req.Path, "/"+apiStageName())
 	parts := strings.Split(normalized, "/")
 	if len(parts) < 6 {
 		return errorResponse(400, "Invalid messages path"), nil
@@ -394,11 +395,25 @@ func jsonResponse(status int, data interface{}) events.APIGatewayProxyResponse {
 		Body:       string(body),
 		Headers: map[string]string{
 			"Content-Type":                 "application/json",
-			"Access-Control-Allow-Origin":  "http://mychatbot-frontend3-0.s3-website-us-west-2.amazonaws.com",
+			"Access-Control-Allow-Origin":  allowedOrigin(),
 			"Access-Control-Allow-Methods": "OPTIONS,GET,POST,PUT,DELETE",
 			"Access-Control-Allow-Headers": "Content-Type,Authorization",
 		},
 	}
+}
+
+func allowedOrigin() string {
+	if origin := os.Getenv("ALLOWED_ORIGIN"); origin != "" {
+		return origin
+	}
+	return "http://mychatbot-frontend3-0.s3-website-us-west-2.amazonaws.com"
+}
+
+func apiStageName() string {
+	if stageName := os.Getenv("API_STAGE_NAME"); stageName != "" {
+		return stageName
+	}
+	return "Prod"
 }
 
 func errorResponse(status int, msg string) events.APIGatewayProxyResponse {
@@ -416,7 +431,7 @@ func corsResponse(status int, msg string) events.APIGatewayProxyResponse {
 		Body:       msg,
 		Headers: map[string]string{
 			"Content-Type":                 "application/json",
-			"Access-Control-Allow-Origin":  "http://mychatbot-frontend3-0.s3-website-us-west-2.amazonaws.com",
+			"Access-Control-Allow-Origin":  allowedOrigin(),
 			"Access-Control-Allow-Methods": "OPTIONS,GET,POST,PUT,DELETE",
 			"Access-Control-Allow-Headers": "Content-Type,Authorization",
 		},

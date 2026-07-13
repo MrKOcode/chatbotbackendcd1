@@ -8,3 +8,14 @@ region = "us-west-2"
 capabilities = "CAPABILITY_IAM"
 image_repositories = []
 confirm_changeset = true
+
+[codex-test.deploy.parameters]
+stack_name = "MyChatbotCodexTest"
+resolve_s3 = true
+s3_prefix = "MyChatbotCodexTest"
+region = "us-west-2"
+capabilities = "CAPABILITY_IAM"
+image_repositories = []
+confirm_changeset = false
+fail_on_empty_changeset = false
+parameter_overrides = "AutoConfirmFunctionName=mychatbot-codex-test-auto-confirm AIChatFunctionName=mychatbot-codex-test-aichat AuthFunctionName=mychatbot-codex-test-auth ChatTableName=ChatMessagesTableCodexTest UserPoolName=mychatbot-codex-test-user-pool UserPoolClientName=mychatbot-codex-test-web CognitoDomainPrefix=mychatbot-codex-test ApiStageName=CodexTest AllowedCorsOrigin=http://localhost:5173 OpenAISecretId=mychatbot/openai"
