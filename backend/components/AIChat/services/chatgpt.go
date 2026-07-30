@@ -30,6 +30,9 @@ type Choice struct {
 	Message Message `json:"message"`
 }
 
+var chatGPTAPIURL = "https://api.openai.com/v1/chat/completions"
+var chatGPTHTTPClient = &http.Client{}
+
 // GetChatGPTResponse interacts with the OpenAI API and retrieves the response
 func GetChatGPTResponse(message string) (string, error) {
 	// Load API key from environment
@@ -49,8 +52,6 @@ func GetChatGPTResponse(message string) (string, error) {
 	}
 
 	// OpenAI API URL
-	apiURL := "https://api.openai.com/v1/chat/completions"
-
 	// Construct the request payload
 	requestPayload := ChatGPTRequest{
 		Model: "gpt-4",
@@ -69,7 +70,7 @@ func GetChatGPTResponse(message string) (string, error) {
 	log.Printf("📤 Sending request to OpenAI: %s", string(requestBody))
 
 	// Create the HTTP request
-	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(requestBody))
+	req, err := http.NewRequest("POST", chatGPTAPIURL, bytes.NewBuffer(requestBody))
 	if err != nil {
 		log.Printf("❌ Failed to create HTTP request: %v", err)
 		return "", fmt.Errorf("failed to create HTTP request: %v", err)
@@ -79,11 +80,10 @@ func GetChatGPTResponse(message string) (string, error) {
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	log.Printf("🌐 Making HTTP request to: %s", apiURL)
+	log.Printf("🌐 Making HTTP request to: %s", chatGPTAPIURL)
 
 	// Make the HTTP request
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := chatGPTHTTPClient.Do(req)
 	if err != nil {
 		log.Printf("❌ Failed to make HTTP request: %v", err)
 		return "", fmt.Errorf("failed to make HTTP request: %v", err)

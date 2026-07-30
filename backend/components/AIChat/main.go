@@ -18,6 +18,8 @@ import (
 	"github.com/MrKOcode/AiChatBot3.0backenddeploy/backend/components/AIChat/services"
 )
 
+var getChatResponse = services.GetChatGPTResponse
+
 func main() {
 	_ = godotenv.Load(".env")
 	if err := services.InitDAL(); err != nil {
@@ -165,7 +167,7 @@ func lambdaSendMessage(req events.APIGatewayProxyRequest) (events.APIGatewayProx
 	}
 
 	// Simulated reply for now
-	botReply, err := services.GetChatGPTResponse(body.Message.Content)
+	botReply, err := getChatResponse(body.Message.Content)
 	if err != nil {
 		return errorResponse(500, "Failed to get AI response: "+err.Error()), nil
 	}

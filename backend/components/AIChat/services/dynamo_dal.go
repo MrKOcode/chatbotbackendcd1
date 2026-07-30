@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -35,8 +36,16 @@ func gsi1sk(ts time.Time, conversationID, messageID string) string {
 }
 
 type dynamoDAL struct {
-	client *ddb.Client
+	client dynamoAPI
 	table  string
+}
+
+type dynamoAPI interface {
+	PutItem(context.Context, *ddb.PutItemInput, ...func(*ddb.Options)) (*ddb.PutItemOutput, error)
+	Query(context.Context, *ddb.QueryInput, ...func(*ddb.Options)) (*ddb.QueryOutput, error)
+	BatchWriteItem(context.Context, *ddb.BatchWriteItemInput, ...func(*ddb.Options)) (*ddb.BatchWriteItemOutput, error)
+	DeleteItem(context.Context, *ddb.DeleteItemInput, ...func(*ddb.Options)) (*ddb.DeleteItemOutput, error)
+	GetItem(context.Context, *ddb.GetItemInput, ...func(*ddb.Options)) (*ddb.GetItemOutput, error)
 }
 
 // Global, used by your handlers/services.
@@ -65,7 +74,15 @@ func encodeLEK(lek map[string]types.AttributeValue) (string, error) {
 	if lek == nil {
 		return "", nil
 	}
-	b, err := json.Marshal(lek)
+	values := make(map[string]string, len(lek))
+	for key, value := range lek {
+		stringValue, ok := value.(*types.AttributeValueMemberS)
+		if !ok {
+			return "", fmt.Errorf("unsupported pagination key type for %s", key)
+		}
+		values[key] = stringValue.Value
+	}
+	b, err := json.Marshal(values)
 	if err != nil {
 		return "", err
 	}
@@ -80,9 +97,13 @@ func decodeLEK(token string) (map[string]types.AttributeValue, error) {
 	if err != nil {
 		return nil, err
 	}
-	var m map[string]types.AttributeValue
-	if err := json.Unmarshal(b, &m); err != nil {
+	var values map[string]string
+	if err := json.Unmarshal(b, &values); err != nil {
 		return nil, err
+	}
+	m := make(map[string]types.AttributeValue, len(values))
+	for key, value := range values {
+		m[key] = &types.AttributeValueMemberS{Value: value}
 	}
 	return m, nil
 }
@@ -332,11 +353,12 @@ func parseTime(s string) time.Time {
 	return t
 }
 func parseMessageID(skOrGsi1sk string) string {
-	// sk:  MSG#<ts>#<id>
-	// gsi: TS#<ts>#CONV#<cid>#MSG#<id>
-	parts := []rune(skOrGsi1sk)
-	_ = parts
-	// simplest: not needed by callers right now; return ""
+	if marker := strings.LastIndex(skOrGsi1sk, "#MSG#"); marker >= 0 {
+		return skOrGsi1sk[marker+len("#MSG#"):]
+	}
+	if marker := strings.LastIndex(skOrGsi1sk, "#"); marker >= 0 {
+		return skOrGsi1sk[marker+1:]
+	}
 	return ""
 }
 

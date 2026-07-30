@@ -17,10 +17,17 @@ import (
 
 var jwks *keyfunc.JWKS
 
-func init() {
+var parseToken = func(tokenString string) (*jwt.Token, error) {
+	if jwks == nil {
+		return nil, fmt.Errorf("JWKS is not initialized")
+	}
+	return jwt.Parse(tokenString, jwks.Keyfunc)
+}
+
+func initJWKS() error {
 	jwksURL := os.Getenv("COGNITO_JWKS_URL")
 	if jwksURL == "" {
-		log.Fatal("COGNITO_JWKS_URL not set in environment")
+		return fmt.Errorf("COGNITO_JWKS_URL not set in environment")
 	}
 
 	var err error
@@ -28,8 +35,9 @@ func init() {
 		RefreshInterval: time.Hour,
 	})
 	if err != nil {
-		log.Fatalf("Failed to get JWKS: %v", err)
+		return fmt.Errorf("failed to get JWKS: %w", err)
 	}
+	return nil
 }
 
 func toJSONStringArray(in []string) string {
@@ -61,7 +69,7 @@ func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.API
 
 	tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
-	token, err := jwt.Parse(tokenStr, jwks.Keyfunc)
+	token, err := parseToken(tokenStr)
 	if err != nil || !token.Valid {
 		return corsResponse(http.StatusUnauthorized, "Invalid token"), nil
 	}
@@ -126,5 +134,8 @@ func response(status int, msg string) events.APIGatewayProxyResponse {
 }
 
 func main() {
+	if err := initJWKS(); err != nil {
+		log.Fatal(err)
+	}
 	lambda.Start(handler)
 }
