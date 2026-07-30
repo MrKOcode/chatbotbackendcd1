@@ -50,11 +50,17 @@ jobs:
 
       - name: Test AIChat
         working-directory: backend/components/AIChat
-        run: go test -v ./...
+        run: |
+          go test -v -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out
+          go tool cover -func=coverage.out | awk '/total:/ { gsub("%", "", $3); if ($3 + 0 < 75) exit 1 }'
 
       - name: Test Auth
         working-directory: backend/components/Auth
-        run: go test -v ./...
+        run: |
+          go test -v -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out
+          go tool cover -func=coverage.out | awk '/total:/ { gsub("%", "", $3); if ($3 + 0 < 75) exit 1 }'
 
       - name: Set up AWS SAM CLI
         uses: aws-actions/setup-sam@v2

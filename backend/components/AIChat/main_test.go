@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,44 +15,67 @@ import (
 )
 
 type fakeStore struct {
-	listUserID string
-	listSince  time.Time
-
-	getConversationErr error
-	putMessageCount    int
+	createID              string
+	createErr             error
+	createUserID          string
+	listUserID            string
+	listSince             time.Time
+	listConversationsPage services.ListPage[services.Conversation]
+	listConversationsErr  error
+	listMessagesPage      services.ListPage[services.ChatMessage]
+	listMessagesErr       error
+	historyPage           services.ListPage[services.ChatMessage]
+	historyErr            error
+	getConversationErr    error
+	putMessageErrAt       int
+	putMessages           []services.ChatMessage
+	deleteErr             error
+	deletedUserID         string
+	deletedConversationID string
 }
 
 func (f *fakeStore) CreateConversation(ctx context.Context, userID, title string) (string, error) {
-	return "conversation-1", nil
+	f.createUserID = userID
+	if f.createID == "" {
+		f.createID = "conversation-1"
+	}
+	return f.createID, f.createErr
 }
 
 func (f *fakeStore) ListConversations(ctx context.Context, userID string, limit int32, nextToken string) (services.ListPage[services.Conversation], error) {
-	return services.ListPage[services.Conversation]{}, nil
+	f.listUserID = userID
+	return f.listConversationsPage, f.listConversationsErr
 }
 
 func (f *fakeStore) PutMessage(ctx context.Context, m services.ChatMessage) error {
-	f.putMessageCount++
+	f.putMessages = append(f.putMessages, m)
+	if f.putMessageErrAt == len(f.putMessages) {
+		return errors.New("put message failed")
+	}
 	return nil
 }
 
 func (f *fakeStore) ListMessages(ctx context.Context, conversationID string, limit int32, nextToken string, newestFirst bool) (services.ListPage[services.ChatMessage], error) {
-	return services.ListPage[services.ChatMessage]{}, nil
+	return f.listMessagesPage, f.listMessagesErr
 }
 
 func (f *fakeStore) DeleteConversationCascade(ctx context.Context, userID, conversationID string) error {
-	return nil
+	f.deletedUserID = userID
+	f.deletedConversationID = conversationID
+	return f.deleteErr
 }
 
 func (f *fakeStore) ListUserMessagesSince(ctx context.Context, userID string, since time.Time, limit int32, nextToken string) (services.ListPage[services.ChatMessage], error) {
 	f.listUserID = userID
 	f.listSince = since
-	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
-	return services.ListPage[services.ChatMessage]{
-		Items: []services.ChatMessage{
+	if f.historyPage.Items == nil && f.historyErr == nil {
+		now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+		f.historyPage.Items = []services.ChatMessage{
 			{ConversationID: "conversation-1", UserID: userID, Role: "user", Content: "What is photosynthesis?", CreatedAt: now},
 			{ConversationID: "conversation-1", UserID: userID, Role: "chatbot", Content: "Photosynthesis converts light into chemical energy.", CreatedAt: now.Add(time.Second)},
-		},
-	}, nil
+		}
+	}
+	return f.historyPage, f.historyErr
 }
 
 func (f *fakeStore) GetConversation(ctx context.Context, userID, conversationID string) (services.Conversation, error) {
@@ -168,7 +193,287 @@ func TestSendMessageRequiresOwnedConversationBeforeWrite(t *testing.T) {
 	if resp.StatusCode != 403 {
 		t.Fatalf("expected status 403, got %d with body %s", resp.StatusCode, resp.Body)
 	}
-	if store.putMessageCount != 0 {
-		t.Fatalf("expected no messages to be written before ownership check, wrote %d", store.putMessageCount)
+	if len(store.putMessages) != 0 {
+		t.Fatalf("expected no messages to be written before ownership check, wrote %d", len(store.putMessages))
 	}
+}
+
+func TestHandlerRoutesAndNotFound(t *testing.T) {
+	store := &fakeStore{}
+	withFakeStore(t, store)
+	t.Setenv("API_STAGE_NAME", "Test")
+
+	tests := []struct {
+		name   string
+		req    events.APIGatewayProxyRequest
+		status int
+	}{
+		{name: "preflight", req: events.APIGatewayProxyRequest{HTTPMethod: "OPTIONS"}, status: 200},
+		{name: "fetch conversations", req: requestWithAuth("GET", "/Test/api/AIchat/conversations"), status: 200},
+		{name: "history", req: requestWithAuth("GET", "/Test/api/AIchat/history"), status: 200},
+		{name: "create", req: requestWithAuth("POST", "/Test/api/AIchat/conversations"), status: 200},
+		{name: "not found", req: requestWithAuth("PATCH", "/Test/api/AIchat/nope"), status: 404},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := handler(tt.req)
+			if err != nil || resp.StatusCode != tt.status {
+				t.Fatalf("handler() = %#v, err=%v; want status %d", resp, err, tt.status)
+			}
+		})
+	}
+}
+
+func TestGetAuthInfo(t *testing.T) {
+	tests := []struct {
+		name    string
+		req     events.APIGatewayProxyRequest
+		wantErr bool
+		admin   bool
+		groups  int
+	}{
+		{name: "missing claims", req: events.APIGatewayProxyRequest{}, wantErr: true},
+		{name: "invalid claims", req: events.APIGatewayProxyRequest{RequestContext: events.APIGatewayProxyRequestContext{Authorizer: map[string]interface{}{"claims": "bad"}}}, wantErr: true},
+		{name: "missing sub", req: authRequest("", nil), wantErr: true},
+		{name: "string groups", req: authRequest("u1", " students, admins "), admin: true, groups: 2},
+		{name: "array groups", req: authRequest("u1", []interface{}{"students", 2, "admins"}), admin: true, groups: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := getAuthInfo(tt.req)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("getAuthInfo() err=%v, wantErr=%v", err, tt.wantErr)
+			}
+			if !tt.wantErr && (got.IsAdmin != tt.admin || len(got.Groups) != tt.groups) {
+				t.Fatalf("unexpected auth info: %+v", got)
+			}
+		})
+	}
+}
+
+func TestResolveEffectiveUserID(t *testing.T) {
+	req := authRequest("student-1", nil)
+	if got, err := resolveEffectiveUserID(req, AuthInfo{Sub: "student-1"}); err != nil || got != "student-1" {
+		t.Fatalf("own user resolution = %q, %v", got, err)
+	}
+	req.QueryStringParameters["targetUserId"] = "student-2"
+	if _, err := resolveEffectiveUserID(req, AuthInfo{Sub: "student-1"}); err == nil {
+		t.Fatal("expected non-admin target override to fail")
+	}
+	if got, err := resolveEffectiveUserID(req, AuthInfo{Sub: "admin-1", IsAdmin: true}); err != nil || got != "student-2" {
+		t.Fatalf("admin target resolution = %q, %v", got, err)
+	}
+}
+
+func TestCreateConversation(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		store := &fakeStore{}
+		withFakeStore(t, store)
+		resp, _ := lambdaCreateConversation(authRequest("student-1", nil))
+		if resp.StatusCode != 200 || store.createUserID != "student-1" || len(store.putMessages) != 1 {
+			t.Fatalf("unexpected response/store: %#v, %+v", resp, store)
+		}
+		if store.putMessages[0].Role != "chatbot" || store.putMessages[0].ConversationID != "conversation-1" {
+			t.Fatalf("unexpected greeting: %+v", store.putMessages[0])
+		}
+	})
+	t.Run("create failure", func(t *testing.T) {
+		store := &fakeStore{createErr: errors.New("database unavailable")}
+		withFakeStore(t, store)
+		resp, _ := lambdaCreateConversation(authRequest("student-1", nil))
+		if resp.StatusCode != 500 {
+			t.Fatalf("got status %d", resp.StatusCode)
+		}
+	})
+	t.Run("greeting failure", func(t *testing.T) {
+		store := &fakeStore{putMessageErrAt: 1}
+		withFakeStore(t, store)
+		resp, _ := lambdaCreateConversation(authRequest("student-1", nil))
+		if resp.StatusCode != 500 {
+			t.Fatalf("got status %d", resp.StatusCode)
+		}
+	})
+}
+
+func TestFetchConversations(t *testing.T) {
+	store := &fakeStore{listConversationsPage: services.ListPage[services.Conversation]{
+		Items: []services.Conversation{{ID: "conversation-1", UserID: "student-1"}},
+	}}
+	withFakeStore(t, store)
+	resp, _ := lambdaFetchConversations(authRequest("student-1", nil))
+	if resp.StatusCode != 200 || !strings.Contains(resp.Body, "conversation-1") {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+
+	store.listConversationsErr = errors.New("query failed")
+	resp, _ = lambdaFetchConversations(authRequest("student-1", nil))
+	if resp.StatusCode != 500 {
+		t.Fatalf("got status %d", resp.StatusCode)
+	}
+}
+
+func TestSendMessageValidationAndSuccess(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "invalid JSON", body: "{"},
+		{name: "missing conversation", body: `{"message":{"content":"hello"}}`},
+		{name: "blank content", body: `{"message":{"conversationId":"conversation-1","content":"  "}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeStore{}
+			withFakeStore(t, store)
+			req := authRequest("student-1", nil)
+			req.Body = tt.body
+			resp, _ := lambdaSendMessage(req)
+			if resp.StatusCode != 400 {
+				t.Fatalf("got status %d, body %s", resp.StatusCode, resp.Body)
+			}
+		})
+	}
+
+	t.Run("success", func(t *testing.T) {
+		store := &fakeStore{}
+		withFakeStore(t, store)
+		previous := getChatResponse
+		getChatResponse = func(message string) (string, error) {
+			if message != "hello" {
+				t.Fatalf("AI received %q", message)
+			}
+			return "Hi there", nil
+		}
+		t.Cleanup(func() { getChatResponse = previous })
+		req := authRequest("student-1", nil)
+		req.Body = `{"message":{"conversationId":"conversation-1","content":"hello"}}`
+		resp, _ := lambdaSendMessage(req)
+		if resp.StatusCode != 200 || len(store.putMessages) != 2 {
+			t.Fatalf("unexpected response/store: %#v, %+v", resp, store.putMessages)
+		}
+		if store.putMessages[0].Role != "user" || store.putMessages[1].Role != "chatbot" {
+			t.Fatalf("unexpected roles: %+v", store.putMessages)
+		}
+	})
+
+	t.Run("AI failure", func(t *testing.T) {
+		store := &fakeStore{}
+		withFakeStore(t, store)
+		previous := getChatResponse
+		getChatResponse = func(string) (string, error) { return "", errors.New("AI unavailable") }
+		t.Cleanup(func() { getChatResponse = previous })
+		req := authRequest("student-1", nil)
+		req.Body = `{"message":{"conversationId":"conversation-1","content":"hello"}}`
+		resp, _ := lambdaSendMessage(req)
+		if resp.StatusCode != 500 || len(store.putMessages) != 1 {
+			t.Fatalf("unexpected response/store: %#v, %+v", resp, store.putMessages)
+		}
+	})
+}
+
+func TestDeleteConversation(t *testing.T) {
+	t.Setenv("API_STAGE_NAME", "Prod")
+	tests := []struct {
+		name       string
+		path       string
+		store      *fakeStore
+		wantStatus int
+	}{
+		{name: "missing id", path: "/Prod/api/AIchat/conversations/", store: &fakeStore{}, wantStatus: 400},
+		{name: "not owned", path: "/Prod/api/AIchat/conversations/c1", store: &fakeStore{getConversationErr: errors.New("missing")}, wantStatus: 403},
+		{name: "delete failure", path: "/Prod/api/AIchat/conversations/c1", store: &fakeStore{deleteErr: errors.New("delete failed")}, wantStatus: 500},
+		{name: "success", path: "/Prod/api/AIchat/conversations/c1", store: &fakeStore{}, wantStatus: 200},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			withFakeStore(t, tt.store)
+			req := authRequest("student-1", nil)
+			req.Path = tt.path
+			resp, _ := lambdaDeleteConversation(req)
+			if resp.StatusCode != tt.wantStatus {
+				t.Fatalf("got status %d, body %s", resp.StatusCode, resp.Body)
+			}
+		})
+	}
+}
+
+func TestFetchMessages(t *testing.T) {
+	t.Setenv("API_STAGE_NAME", "Prod")
+	tests := []struct {
+		name       string
+		path       string
+		store      *fakeStore
+		wantStatus int
+	}{
+		{name: "invalid path", path: "/Prod/api/AIchat/messages", store: &fakeStore{}, wantStatus: 400},
+		{name: "not owned", path: "/Prod/api/AIchat/conversations/c1/messages", store: &fakeStore{getConversationErr: errors.New("missing")}, wantStatus: 403},
+		{name: "query failure", path: "/Prod/api/AIchat/conversations/c1/messages", store: &fakeStore{listMessagesErr: errors.New("query failed")}, wantStatus: 500},
+		{name: "success", path: "/Prod/api/AIchat/conversations/c1/messages", store: &fakeStore{listMessagesPage: services.ListPage[services.ChatMessage]{Items: []services.ChatMessage{{ID: "m1"}}, NextToken: "next"}}, wantStatus: 200},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			withFakeStore(t, tt.store)
+			req := authRequest("student-1", nil)
+			req.Path = tt.path
+			resp, _ := lambdaFetchMessages(req)
+			if resp.StatusCode != tt.wantStatus {
+				t.Fatalf("got status %d, body %s", resp.StatusCode, resp.Body)
+			}
+			if tt.name == "success" && (!strings.Contains(resp.Body, `"hasMore":true`) || !strings.Contains(resp.Body, `"m1"`)) {
+				t.Fatalf("unexpected success body: %s", resp.Body)
+			}
+		})
+	}
+}
+
+func TestFetchHistoryPairsAndStopsAtFive(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var items []services.ChatMessage
+	items = append(items, services.ChatMessage{ConversationID: "ignore", Role: "chatbot", Content: "orphan", CreatedAt: now})
+	for i := 0; i < 6; i++ {
+		id := fmt.Sprintf("c%d", i)
+		items = append(items,
+			services.ChatMessage{ConversationID: id, Role: "user", Content: "question", CreatedAt: now.Add(time.Duration(i+1) * time.Second)},
+			services.ChatMessage{ConversationID: id, Role: "chatbot", Content: "answer", CreatedAt: now.Add(time.Duration(i+1)*time.Second + time.Millisecond)},
+		)
+	}
+	store := &fakeStore{historyPage: services.ListPage[services.ChatMessage]{Items: items}}
+	withFakeStore(t, store)
+	resp, _ := lambdaFetchChatHistory(authRequest("student-1", nil))
+	var body struct {
+		History []map[string]string `json:"history"`
+	}
+	if err := json.Unmarshal([]byte(resp.Body), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.History) != 5 {
+		t.Fatalf("got %d history entries", len(body.History))
+	}
+}
+
+func TestResponseHelpersAndEnvironmentDefaults(t *testing.T) {
+	t.Setenv("ALLOWED_ORIGIN", "")
+	t.Setenv("API_STAGE_NAME", "")
+	if allowedOrigin() == "" || apiStageName() != "Prod" {
+		t.Fatal("unexpected defaults")
+	}
+	t.Setenv("ALLOWED_ORIGIN", "https://example.com")
+	t.Setenv("API_STAGE_NAME", "Dev")
+	resp := errorResponse(418, "teapot")
+	if resp.StatusCode != 418 || resp.Headers["Access-Control-Allow-Origin"] != "https://example.com" {
+		t.Fatalf("unexpected error response: %#v", resp)
+	}
+	if apiStageName() != "Dev" {
+		t.Fatal("stage override ignored")
+	}
+	if len(generateULID()) != 26 {
+		t.Fatal("unexpected ULID")
+	}
+}
+
+func requestWithAuth(method, path string) events.APIGatewayProxyRequest {
+	req := authRequest("student-1", nil)
+	req.HTTPMethod = method
+	req.Path = path
+	return req
 }
