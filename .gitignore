@@ -18,6 +18,7 @@ bootstrap
 # SAM build directory
 .aws-sam/
 
+
 # SAM/CloudFormation artifacts
 build/
 build.toml
@@ -67,3 +68,10 @@ backend/components/Auth/bootstrap
 backend/components/Auth/main
 backend/awscliv2.zip
 node_modules/
+
+#codex
+.codex-go-cache/
+
+
+#aws
+backend/aws/
