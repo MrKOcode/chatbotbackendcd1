@@ -34,7 +34,7 @@ var chatGPTAPIURL = "https://api.openai.com/v1/chat/completions"
 var chatGPTHTTPClient = &http.Client{}
 
 // GetChatGPTResponse interacts with the OpenAI API and retrieves the response
-func GetChatGPTResponse(message string) (string, error) {
+func GetChatGPTResponse(messages []Message) (string, error) {
 	// Load API key from environment
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	log.Printf("🔑 Checking API Key: %s", func() string {
@@ -54,10 +54,8 @@ func GetChatGPTResponse(message string) (string, error) {
 	// OpenAI API URL
 	// Construct the request payload
 	requestPayload := ChatGPTRequest{
-		Model: "gpt-4",
-		Messages: []Message{
-			{Role: "user", Content: message},
-		},
+		Model:    "gpt-4",
+		Messages: messages,
 	}
 
 	// Serialize the request payload to JSON

@@ -268,7 +268,7 @@ func TestDeleteConversationCascade(t *testing.T) {
 func TestGetChatGPTResponse(t *testing.T) {
 	t.Run("missing key", func(t *testing.T) {
 		t.Setenv("OPENAI_API_KEY", "")
-		if _, err := GetChatGPTResponse("hello"); err == nil {
+		if _, err := GetChatGPTResponse([]Message{{Role: "user", Content: "hello"}}); err == nil {
 			t.Fatal("expected missing key error")
 		}
 	})
@@ -292,7 +292,9 @@ func TestGetChatGPTResponse(t *testing.T) {
 						t.Errorf("unexpected request: %s %#v", r.Method, r.Header)
 					}
 					body, _ := io.ReadAll(r.Body)
-					if !strings.Contains(string(body), `"content":"question"`) {
+					payload := string(body)
+					if !strings.Contains(payload, `"role":"user","content":"question"`) ||
+						!strings.Contains(payload, `"role":"assistant","content":"previous answer"`) {
 						t.Errorf("unexpected payload: %s", body)
 					}
 				}
@@ -304,7 +306,10 @@ func TestGetChatGPTResponse(t *testing.T) {
 			chatGPTAPIURL, chatGPTHTTPClient = server.URL, server.Client()
 			t.Cleanup(func() { chatGPTAPIURL, chatGPTHTTPClient = oldURL, oldClient })
 			t.Setenv("OPENAI_API_KEY", "test-key")
-			got, err := GetChatGPTResponse("question")
+			got, err := GetChatGPTResponse([]Message{
+				{Role: "assistant", Content: "previous answer"},
+				{Role: "user", Content: "question"},
+			})
 			if (err != nil) != tt.wantErr || got != tt.want {
 				t.Fatalf("response=%q err=%v", got, err)
 			}
@@ -316,7 +321,7 @@ func TestGetChatGPTResponse(t *testing.T) {
 		chatGPTHTTPClient = &http.Client{Timeout: 100 * time.Millisecond}
 		t.Cleanup(func() { chatGPTAPIURL, chatGPTHTTPClient = oldURL, oldClient })
 		t.Setenv("OPENAI_API_KEY", "test-key")
-		if _, err := GetChatGPTResponse("question"); err == nil {
+		if _, err := GetChatGPTResponse([]Message{{Role: "user", Content: "question"}}); err == nil {
 			t.Fatal("expected transport error")
 		}
 	})

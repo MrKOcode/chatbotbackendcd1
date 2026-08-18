@@ -24,6 +24,8 @@ type fakeStore struct {
 	listConversationsErr  error
 	listMessagesPage      services.ListPage[services.ChatMessage]
 	listMessagesErr       error
+	listMessagesLimit     int32
+	listMessagesNewest    bool
 	historyPage           services.ListPage[services.ChatMessage]
 	historyErr            error
 	getConversationErr    error
@@ -56,6 +58,8 @@ func (f *fakeStore) PutMessage(ctx context.Context, m services.ChatMessage) erro
 }
 
 func (f *fakeStore) ListMessages(ctx context.Context, conversationID string, limit int32, nextToken string, newestFirst bool) (services.ListPage[services.ChatMessage], error) {
+	f.listMessagesLimit = limit
+	f.listMessagesNewest = newestFirst
 	return f.listMessagesPage, f.listMessagesErr
 }
 
@@ -335,12 +339,25 @@ func TestSendMessageValidationAndSuccess(t *testing.T) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		store := &fakeStore{}
+		store := &fakeStore{listMessagesPage: services.ListPage[services.ChatMessage]{Items: []services.ChatMessage{
+			{Role: "chatbot", Content: "Previous answer"},
+			{Role: "user", Content: "Previous question"},
+		}}}
 		withFakeStore(t, store)
 		previous := getChatResponse
-		getChatResponse = func(message string) (string, error) {
-			if message != "hello" {
-				t.Fatalf("AI received %q", message)
+		getChatResponse = func(messages []services.Message) (string, error) {
+			want := []services.Message{
+				{Role: "user", Content: "Previous question"},
+				{Role: "assistant", Content: "Previous answer"},
+				{Role: "user", Content: "hello"},
+			}
+			if len(messages) != len(want) {
+				t.Fatalf("AI received %+v", messages)
+			}
+			for i := range want {
+				if messages[i] != want[i] {
+					t.Fatalf("AI message %d = %+v, want %+v", i, messages[i], want[i])
+				}
 			}
 			return "Hi there", nil
 		}
@@ -354,13 +371,16 @@ func TestSendMessageValidationAndSuccess(t *testing.T) {
 		if store.putMessages[0].Role != "user" || store.putMessages[1].Role != "chatbot" {
 			t.Fatalf("unexpected roles: %+v", store.putMessages)
 		}
+		if store.listMessagesLimit != recentMessageLimit-1 || !store.listMessagesNewest {
+			t.Fatalf("unexpected history query: limit=%d newest=%v", store.listMessagesLimit, store.listMessagesNewest)
+		}
 	})
 
 	t.Run("AI failure", func(t *testing.T) {
 		store := &fakeStore{}
 		withFakeStore(t, store)
 		previous := getChatResponse
-		getChatResponse = func(string) (string, error) { return "", errors.New("AI unavailable") }
+		getChatResponse = func([]services.Message) (string, error) { return "", errors.New("AI unavailable") }
 		t.Cleanup(func() { getChatResponse = previous })
 		req := authRequest("student-1", nil)
 		req.Body = `{"message":{"conversationId":"conversation-1","content":"hello"}}`
@@ -369,6 +389,37 @@ func TestSendMessageValidationAndSuccess(t *testing.T) {
 			t.Fatalf("unexpected response/store: %#v, %+v", resp, store.putMessages)
 		}
 	})
+
+	t.Run("history failure", func(t *testing.T) {
+		store := &fakeStore{listMessagesErr: errors.New("query failed")}
+		withFakeStore(t, store)
+		req := authRequest("student-1", nil)
+		req.Body = `{"message":{"conversationId":"conversation-1","content":"hello"}}`
+		resp, _ := lambdaSendMessage(req)
+		if resp.StatusCode != 500 || len(store.putMessages) != 0 {
+			t.Fatalf("unexpected response/store: %#v, %+v", resp, store.putMessages)
+		}
+	})
+}
+
+func TestOpenAIMessagesFiltersUnsupportedHistory(t *testing.T) {
+	got := openAIMessages([]services.ChatMessage{
+		{Role: "tool", Content: "ignore me"},
+		{Role: "chatbot", Content: "  answer  "},
+		{Role: "user", Content: "   "},
+	}, "current")
+	want := []services.Message{
+		{Role: "assistant", Content: "answer"},
+		{Role: "user", Content: "current"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("message %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
 }
 
 func TestDeleteConversation(t *testing.T) {
