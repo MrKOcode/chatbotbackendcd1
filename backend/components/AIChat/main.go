@@ -20,6 +20,8 @@ import (
 
 var getChatResponse = services.GetChatGPTResponse
 
+const recentMessageLimit int32 = 20
+
 func main() {
 	_ = godotenv.Load(".env")
 	if err := services.InitDAL(); err != nil {
@@ -153,6 +155,20 @@ func lambdaSendMessage(req events.APIGatewayProxyRequest) (events.APIGatewayProx
 		return errorResponse(403, "Forbidden"), nil
 	}
 
+	// Load the most recent completed turns before storing the new message. This
+	// guarantees that the current user message appears exactly once in the model
+	// context, even though DynamoDB queries are eventually consistent by default.
+	recentPage, err := services.Store.ListMessages(
+		context.Background(),
+		body.Message.ConversationID,
+		recentMessageLimit-1,
+		"",
+		true,
+	)
+	if err != nil {
+		return errorResponse(500, "Failed to load recent conversation history"), nil
+	}
+
 	now := time.Now().UTC()
 	userMsg := services.ChatMessage{
 		ID:             generateULID(),
@@ -166,8 +182,8 @@ func lambdaSendMessage(req events.APIGatewayProxyRequest) (events.APIGatewayProx
 		return errorResponse(500, err.Error()), nil
 	}
 
-	// Simulated reply for now
-	botReply, err := getChatResponse(body.Message.Content)
+	messages := openAIMessages(recentPage.Items, body.Message.Content)
+	botReply, err := getChatResponse(messages)
 	if err != nil {
 		return errorResponse(500, "Failed to get AI response: "+err.Error()), nil
 	}
@@ -187,6 +203,31 @@ func lambdaSendMessage(req events.APIGatewayProxyRequest) (events.APIGatewayProx
 		"message":  userMsg,
 		"response": botMsg,
 	}), nil
+}
+
+// openAIMessages converts the newest-first DynamoDB result into the
+// oldest-first role sequence expected by the chat API, then appends the new
+// user message. Unknown and blank stored messages are intentionally ignored.
+func openAIMessages(recent []services.ChatMessage, currentUserMessage string) []services.Message {
+	messages := make([]services.Message, 0, len(recent)+1)
+	for i := len(recent) - 1; i >= 0; i-- {
+		content := strings.TrimSpace(recent[i].Content)
+		if content == "" {
+			continue
+		}
+
+		role := recent[i].Role
+		if role == "chatbot" {
+			role = "assistant"
+		}
+		if role != "user" && role != "assistant" {
+			continue
+		}
+
+		messages = append(messages, services.Message{Role: role, Content: content})
+	}
+
+	return append(messages, services.Message{Role: "user", Content: currentUserMessage})
 }
 
 func lambdaDeleteConversation(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {

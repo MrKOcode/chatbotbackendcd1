@@ -1,0 +1,64 @@
+AI CHATBOT 3.0 BACKEND - DEVELOPMENT NOTES
+Date: August 18, 2026
+
+TODAY'S UPDATE
+
+Added recent conversational history to the AI chat request.
+
+Previously, the backend stored every message in DynamoDB but sent only the
+current user message to OpenAI. Each request therefore appeared to be a new
+conversation to the model.
+
+The backend now:
+
+- Retrieves up to 19 recent messages from the current conversation.
+- Keeps the total OpenAI context at a maximum of 20 messages after adding the
+  current user message.
+- Converts stored "chatbot" roles to the OpenAI "assistant" role.
+- Sends the history in chronological order, from oldest to newest.
+- Ignores blank messages and unsupported stored roles.
+- Loads history before saving the current message so that the current message
+  cannot accidentally appear twice in the OpenAI request.
+- Returns an error without storing the new message if conversation history
+  cannot be loaded.
+
+FILES MODIFIED
+
+- backend/components/AIChat/main.go
+- backend/components/AIChat/main_test.go
+- backend/components/AIChat/services/chatgpt.go
+- backend/components/AIChat/services/services_test.go
+
+VALIDATION
+
+- Ran all tests in backend/components/AIChat with: go test ./...
+- All AIChat and services tests passed.
+- Git commit: 51397c0 Add recent conversation context
+- Git branch: codex/backend-unit-tests
+
+EXPECTED RESULT
+
+The chatbot can now understand follow-up questions and refer to recent parts of
+the same conversation. This should make responses feel more connected and less
+like every message starts a new chat.
+
+MY LATER UPDATES
+
+Date/time:
+
+Changes made:
+
+
+MODIFICATIONS I WANT TO TRY
+
+
+
+THOUGHTS AND OBSERVATIONS
+
+
+
+PROBLEMS OR BUGS FOUND
+
+
+
+NEXT STEPS
