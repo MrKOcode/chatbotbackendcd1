@@ -313,6 +313,9 @@ func TestGetChatGPTResponse(t *testing.T) {
 			if (err != nil) != tt.wantErr || got != tt.want {
 				t.Fatalf("response=%q err=%v", got, err)
 			}
+			if tt.name == "API error" && strings.Contains(err.Error(), "limited") {
+				t.Fatalf("provider response body leaked through error: %v", err)
+			}
 		})
 	}
 	t.Run("transport error", func(t *testing.T) {
