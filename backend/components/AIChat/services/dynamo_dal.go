@@ -21,6 +21,8 @@ import (
 const (
 	entityConversation = "Conversation"
 	entityMessage      = "Message"
+	entityMemory       = "ConversationMemory"
+	entityProfile      = "StudentProfile"
 )
 
 // Key helpers
@@ -30,6 +32,8 @@ func pkConv(conversationID string) string { return "CONV#" + conversationID }
 func skMsg(ts time.Time, messageID string) string {
 	return "MSG#" + ts.UTC().Format(time.RFC3339Nano) + "#" + messageID
 }
+func skMemory() string                { return "MEMORY" }
+func skProfile() string               { return "LEARNING_PROFILE" }
 func gsi1pkUser(userID string) string { return "USER#" + userID }
 func gsi1sk(ts time.Time, conversationID, messageID string) string {
 	return "TS#" + ts.UTC().Format(time.RFC3339Nano) + "#CONV#" + conversationID + "#MSG#" + messageID
@@ -178,6 +182,7 @@ func (d *dynamoDAL) PutMessage(ctx context.Context, m ChatMessage) error {
 		"content":        &types.AttributeValueMemberS{Value: m.Content},
 		"createdAt":      &types.AttributeValueMemberS{Value: ts.Format(time.RFC3339Nano)},
 		"epochMs":        &types.AttributeValueMemberN{Value: toEpochMs(ts)},
+		"tokenEstimate":  &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", m.TokenEstimate)},
 		// GSI1 for user-time queries:
 		"GSI1PK": &types.AttributeValueMemberS{Value: gsi1pkUser(m.UserID)},
 		"GSI1SK": &types.AttributeValueMemberS{Value: gsi1sk(ts, m.ConversationID, m.ID)},
@@ -220,6 +225,7 @@ func (d *dynamoDAL) ListMessages(ctx context.Context, conversationID string, lim
 			Role:           attrS(it, "role"),
 			Content:        attrS(it, "content"),
 			CreatedAt:      parseTime(attrS(it, "createdAt")),
+			TokenEstimate:  attrInt(it, "tokenEstimate"),
 		})
 	}
 	// If newestFirst==true and Dynamo returned ascending (because ScanIndexForward=false already gives descending),
@@ -328,6 +334,7 @@ func (d *dynamoDAL) ListUserMessagesSince(ctx context.Context, userID string, si
 			Role:           attrS(it, "role"),
 			Content:        attrS(it, "content"),
 			CreatedAt:      parseTime(attrS(it, "createdAt")),
+			TokenEstimate:  attrInt(it, "tokenEstimate"),
 		})
 	}
 	token, _ := encodeLEK(out.LastEvaluatedKey)
@@ -341,6 +348,37 @@ func attrS(m map[string]types.AttributeValue, k string) string {
 		return v.Value
 	}
 	return ""
+}
+func attrInt(m map[string]types.AttributeValue, k string) int {
+	if v, ok := m[k].(*types.AttributeValueMemberN); ok {
+		var value int
+		_, _ = fmt.Sscanf(v.Value, "%d", &value)
+		return value
+	}
+	return 0
+}
+
+func attrStrings(m map[string]types.AttributeValue, k string) []string {
+	if v, ok := m[k].(*types.AttributeValueMemberL); ok {
+		result := make([]string, 0, len(v.Value))
+		for _, item := range v.Value {
+			if s, ok := item.(*types.AttributeValueMemberS); ok && strings.TrimSpace(s.Value) != "" {
+				result = append(result, s.Value)
+			}
+		}
+		return result
+	}
+	return nil
+}
+
+func stringList(values []string) types.AttributeValue {
+	items := make([]types.AttributeValue, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			items = append(items, &types.AttributeValueMemberS{Value: value})
+		}
+	}
+	return &types.AttributeValueMemberL{Value: items}
 }
 func toEpochMs(t time.Time) string {
 	return fmt.Sprintf("%d", t.UnixMilli())
@@ -385,4 +423,75 @@ func (d *dynamoDAL) GetConversation(ctx context.Context, userID, conversationID 
 		Title:     attrS(out.Item, "title"),
 		CreatedAt: parseTime(attrS(out.Item, "createdAt")),
 	}, nil
+}
+
+func (d *dynamoDAL) GetConversationMemory(ctx context.Context, conversationID string) (ConversationMemory, error) {
+	out, err := d.client.GetItem(ctx, &ddb.GetItemInput{
+		TableName:      aws.String(d.table),
+		Key:            map[string]types.AttributeValue{"PK": &types.AttributeValueMemberS{Value: pkConv(conversationID)}, "SK": &types.AttributeValueMemberS{Value: skMemory()}},
+		ConsistentRead: aws.Bool(true),
+	})
+	if err != nil {
+		return ConversationMemory{}, err
+	}
+	if len(out.Item) == 0 {
+		return ConversationMemory{ConversationID: conversationID}, nil
+	}
+	return ConversationMemory{
+		ConversationID:    conversationID,
+		Summary:           attrS(out.Item, "summary"),
+		SummarizedThrough: parseTime(attrS(out.Item, "summarizedThrough")),
+		Version:           attrInt(out.Item, "version"),
+		UpdatedAt:         parseTime(attrS(out.Item, "updatedAt")),
+	}, nil
+}
+
+func (d *dynamoDAL) PutConversationMemory(ctx context.Context, memory ConversationMemory) error {
+	now := memory.UpdatedAt.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	_, err := d.client.PutItem(ctx, &ddb.PutItemInput{TableName: aws.String(d.table), Item: map[string]types.AttributeValue{
+		"PK":                &types.AttributeValueMemberS{Value: pkConv(memory.ConversationID)},
+		"SK":                &types.AttributeValueMemberS{Value: skMemory()},
+		"entityType":        &types.AttributeValueMemberS{Value: entityMemory},
+		"conversationId":    &types.AttributeValueMemberS{Value: memory.ConversationID},
+		"summary":           &types.AttributeValueMemberS{Value: memory.Summary},
+		"summarizedThrough": &types.AttributeValueMemberS{Value: memory.SummarizedThrough.UTC().Format(time.RFC3339Nano)},
+		"version":           &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", memory.Version)},
+		"updatedAt":         &types.AttributeValueMemberS{Value: now.Format(time.RFC3339Nano)},
+	}})
+	return err
+}
+
+func (d *dynamoDAL) GetStudentProfile(ctx context.Context, userID string) (StudentProfile, error) {
+	out, err := d.client.GetItem(ctx, &ddb.GetItemInput{
+		TableName:      aws.String(d.table),
+		Key:            map[string]types.AttributeValue{"PK": &types.AttributeValueMemberS{Value: pkUser(userID)}, "SK": &types.AttributeValueMemberS{Value: skProfile()}},
+		ConsistentRead: aws.Bool(true),
+	})
+	if err != nil {
+		return StudentProfile{}, err
+	}
+	if len(out.Item) == 0 {
+		return StudentProfile{UserID: userID}, nil
+	}
+	return StudentProfile{UserID: userID, Courses: attrStrings(out.Item, "courses"), Goals: attrStrings(out.Item, "goals"), Strengths: attrStrings(out.Item, "strengths"), Misconceptions: attrStrings(out.Item, "misconceptions"), Preferences: attrStrings(out.Item, "preferences"), UpdatedAt: parseTime(attrS(out.Item, "updatedAt"))}, nil
+}
+
+func (d *dynamoDAL) PutStudentProfile(ctx context.Context, profile StudentProfile) error {
+	now := profile.UpdatedAt.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	_, err := d.client.PutItem(ctx, &ddb.PutItemInput{TableName: aws.String(d.table), Item: map[string]types.AttributeValue{
+		"PK":         &types.AttributeValueMemberS{Value: pkUser(profile.UserID)},
+		"SK":         &types.AttributeValueMemberS{Value: skProfile()},
+		"entityType": &types.AttributeValueMemberS{Value: entityProfile},
+		"userId":     &types.AttributeValueMemberS{Value: profile.UserID},
+		"courses":    stringList(profile.Courses), "goals": stringList(profile.Goals), "strengths": stringList(profile.Strengths),
+		"misconceptions": stringList(profile.Misconceptions), "preferences": stringList(profile.Preferences),
+		"updatedAt": &types.AttributeValueMemberS{Value: now.Format(time.RFC3339Nano)},
+	}})
+	return err
 }

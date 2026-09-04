@@ -19,6 +19,25 @@ type ChatMessage struct {
 	Role           string    `json:"role"`
 	Content        string    `json:"content"`
 	CreatedAt      time.Time `json:"createdAt"`
+	TokenEstimate  int       `json:"tokenEstimate,omitempty"`
+}
+
+type ConversationMemory struct {
+	ConversationID    string    `json:"conversationId"`
+	Summary           string    `json:"summary"`
+	SummarizedThrough time.Time `json:"summarizedThrough"`
+	Version           int       `json:"version"`
+	UpdatedAt         time.Time `json:"updatedAt"`
+}
+
+type StudentProfile struct {
+	UserID         string    `json:"userId"`
+	Courses        []string  `json:"courses,omitempty"`
+	Goals          []string  `json:"goals,omitempty"`
+	Strengths      []string  `json:"strengths,omitempty"`
+	Misconceptions []string  `json:"misconceptions,omitempty"`
+	Preferences    []string  `json:"preferences,omitempty"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 // Generic paged list (Dynamo uses a "cursor" token, not offset)
@@ -35,4 +54,8 @@ type DAL interface {
 	DeleteConversationCascade(ctx context.Context, userID, conversationID string) error
 	ListUserMessagesSince(ctx context.Context, userID string, since time.Time, limit int32, nextToken string) (ListPage[ChatMessage], error)
 	GetConversation(ctx context.Context, userID, conversationID string) (Conversation, error)
+	GetConversationMemory(ctx context.Context, conversationID string) (ConversationMemory, error)
+	PutConversationMemory(ctx context.Context, memory ConversationMemory) error
+	GetStudentProfile(ctx context.Context, userID string) (StudentProfile, error)
+	PutStudentProfile(ctx context.Context, profile StudentProfile) error
 }

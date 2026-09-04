@@ -34,6 +34,12 @@ type fakeStore struct {
 	deleteErr             error
 	deletedUserID         string
 	deletedConversationID string
+	memory                services.ConversationMemory
+	profile               services.StudentProfile
+	putMemory             services.ConversationMemory
+	putProfile            services.StudentProfile
+	memoryErr             error
+	profileErr            error
 }
 
 func (f *fakeStore) CreateConversation(ctx context.Context, userID, title string) (string, error) {
@@ -87,6 +93,21 @@ func (f *fakeStore) GetConversation(ctx context.Context, userID, conversationID 
 		return services.Conversation{}, f.getConversationErr
 	}
 	return services.Conversation{ID: conversationID, UserID: userID}, nil
+}
+
+func (f *fakeStore) GetConversationMemory(context.Context, string) (services.ConversationMemory, error) {
+	return f.memory, f.memoryErr
+}
+func (f *fakeStore) PutConversationMemory(_ context.Context, memory services.ConversationMemory) error {
+	f.putMemory = memory
+	return f.memoryErr
+}
+func (f *fakeStore) GetStudentProfile(context.Context, string) (services.StudentProfile, error) {
+	return f.profile, f.profileErr
+}
+func (f *fakeStore) PutStudentProfile(_ context.Context, profile services.StudentProfile) error {
+	f.putProfile = profile
+	return f.profileErr
 }
 
 func withFakeStore(t *testing.T, store *fakeStore) {
@@ -371,7 +392,7 @@ func TestSendMessageValidationAndSuccess(t *testing.T) {
 		if store.putMessages[0].Role != "user" || store.putMessages[1].Role != "chatbot" {
 			t.Fatalf("unexpected roles: %+v", store.putMessages)
 		}
-		if store.listMessagesLimit != recentMessageLimit-1 || !store.listMessagesNewest {
+		if store.listMessagesLimit != recentMessageQueryLimit || !store.listMessagesNewest {
 			t.Fatalf("unexpected history query: limit=%d newest=%v", store.listMessagesLimit, store.listMessagesNewest)
 		}
 	})
@@ -407,7 +428,7 @@ func TestOpenAIMessagesFiltersUnsupportedHistory(t *testing.T) {
 		{Role: "tool", Content: "ignore me"},
 		{Role: "chatbot", Content: "  answer  "},
 		{Role: "user", Content: "   "},
-	}, "current")
+	}, "current", services.StudentProfile{}, services.ConversationMemory{})
 	want := []services.Message{
 		{Role: "assistant", Content: "answer"},
 		{Role: "user", Content: "current"},
@@ -419,6 +440,60 @@ func TestOpenAIMessagesFiltersUnsupportedHistory(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("message %d = %+v, want %+v", i, got[i], want[i])
 		}
+	}
+}
+
+func TestThreeLayerContextAndTokenBudget(t *testing.T) {
+	now := time.Now().UTC()
+	recent := []services.ChatMessage{
+		{Role: "chatbot", Content: "new answer", CreatedAt: now, TokenEstimate: 2},
+		{Role: "user", Content: "new question", CreatedAt: now.Add(-time.Second), TokenEstimate: 2},
+		{Role: "user", Content: "too old", CreatedAt: now.Add(-2 * time.Second), TokenEstimate: 50},
+	}
+	selected := selectRecentMessages(recent, 4)
+	if len(selected) != 2 {
+		t.Fatalf("selected %d messages, want 2", len(selected))
+	}
+	profile := services.StudentProfile{UserID: "u1", Goals: []string{"learn algebra"}}
+	memory := services.ConversationMemory{Summary: "Previously studied factoring."}
+	messages := openAIMessages(selected, "help me continue", profile, memory)
+	if len(messages) != 4 || messages[0].Role != "system" || !strings.Contains(messages[0].Content, "learn algebra") || !strings.Contains(messages[0].Content, "factoring") {
+		t.Fatalf("unexpected layered context: %+v", messages)
+	}
+	if messages[1].Content != "new question" || messages[2].Content != "new answer" || messages[3].Content != "help me continue" {
+		t.Fatalf("unexpected message order: %+v", messages)
+	}
+}
+
+func TestMessagesAfterAndMemoryThreshold(t *testing.T) {
+	now := time.Now().UTC()
+	messages := []services.ChatMessage{{CreatedAt: now}, {CreatedAt: now.Add(time.Second)}}
+	if got := messagesAfter(messages, now); len(got) != 1 || !got[0].CreatedAt.Equal(now.Add(time.Second)) {
+		t.Fatalf("unexpected messages after marker: %+v", got)
+	}
+	large := []services.ChatMessage{{Content: strings.Repeat("x", memoryTokenThreshold*3)}}
+	if !shouldRefreshMemory(large) || shouldRefreshMemory([]services.ChatMessage{{Content: "short"}}) {
+		t.Fatal("unexpected memory refresh threshold")
+	}
+}
+
+func TestRefreshMemoryPersistsSummaryAndProfile(t *testing.T) {
+	store := &fakeStore{}
+	withFakeStore(t, store)
+	previous := generateMemory
+	generateMemory = func(summary string, profile services.StudentProfile, messages []services.ChatMessage) (services.MemoryUpdate, error) {
+		if summary != "old" || len(messages) != 2 || messages[0].Content != "first" {
+			t.Fatalf("unexpected summarization input: %q %+v", summary, messages)
+		}
+		return services.MemoryUpdate{Summary: "updated", Courses: []string{"Math"}, Strengths: []string{"factoring"}}, nil
+	}
+	t.Cleanup(func() { generateMemory = previous })
+	now := time.Now().UTC()
+	err := refreshMemory(context.Background(), "u1", services.ConversationMemory{ConversationID: "c1", Summary: "old", Version: 2}, services.StudentProfile{UserID: "u1"}, []services.ChatMessage{
+		{Content: "second", CreatedAt: now.Add(time.Second)}, {Content: "first", CreatedAt: now},
+	})
+	if err != nil || store.putMemory.Summary != "updated" || store.putMemory.Version != 3 || store.putProfile.Courses[0] != "Math" {
+		t.Fatalf("memory was not persisted: err=%v memory=%+v profile=%+v", err, store.putMemory, store.putProfile)
 	}
 }
 
