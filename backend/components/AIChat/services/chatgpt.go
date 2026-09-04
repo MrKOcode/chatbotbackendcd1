@@ -4,8 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"log"
+	"io"
 	"net/http"
 	"os"
 )
@@ -35,18 +34,7 @@ var chatGPTHTTPClient = &http.Client{}
 
 // GetChatGPTResponse interacts with the OpenAI API and retrieves the response
 func GetChatGPTResponse(messages []Message) (string, error) {
-	// Load API key from environment
 	apiKey := os.Getenv("OPENAI_API_KEY")
-	log.Printf("🔑 Checking API Key: %s", func() string {
-		if apiKey == "" {
-			return "NOT SET"
-		}
-		if len(apiKey) > 20 {
-			return apiKey[:20] + "..."
-		}
-		return apiKey + "..."
-	}())
-
 	if apiKey == "" {
 		return "", fmt.Errorf("OPENAI_API_KEY is not set in environment variables")
 	}
@@ -61,69 +49,50 @@ func GetChatGPTResponse(messages []Message) (string, error) {
 	// Serialize the request payload to JSON
 	requestBody, err := json.Marshal(requestPayload)
 	if err != nil {
-		log.Printf("❌ Failed to marshal request payload: %v", err)
-		return "", fmt.Errorf("failed to marshal request payload: %v", err)
+		return "", fmt.Errorf("failed to marshal request payload: %w", err)
 	}
-
-	log.Printf("📤 Sending request to OpenAI: %s", string(requestBody))
 
 	// Create the HTTP request
 	req, err := http.NewRequest("POST", chatGPTAPIURL, bytes.NewBuffer(requestBody))
 	if err != nil {
-		log.Printf("❌ Failed to create HTTP request: %v", err)
-		return "", fmt.Errorf("failed to create HTTP request: %v", err)
+		return "", fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
 	// Set headers
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	log.Printf("🌐 Making HTTP request to: %s", chatGPTAPIURL)
-
 	// Make the HTTP request
 	resp, err := chatGPTHTTPClient.Do(req)
 	if err != nil {
-		log.Printf("❌ Failed to make HTTP request: %v", err)
-		return "", fmt.Errorf("failed to make HTTP request: %v", err)
+		return "", fmt.Errorf("failed to make HTTP request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	log.Printf("📋 Response Status Code: %d", resp.StatusCode)
-
 	// Read the response body
-	responseBody, err := ioutil.ReadAll(resp.Body)
+	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("❌ Failed to read response body: %v", err)
-		return "", fmt.Errorf("failed to read response body: %v", err)
+		return "", fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	log.Printf("📥 Raw response body: %s", string(responseBody))
-
-	// Check for API errors
+	// Do not include the provider response body here. It may contain request
+	// details, user content, or other sensitive information and this error can
+	// be returned to callers or written to application logs.
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("❌ OpenAI API returned %d: %s", resp.StatusCode, string(responseBody))
-		return "", fmt.Errorf("OpenAI API error (status %d): %s", resp.StatusCode, string(responseBody))
+		return "", fmt.Errorf("OpenAI API error (status %d)", resp.StatusCode)
 	}
 
 	// Parse the response JSON
 	var chatResponse ChatGPTResponse
 	err = json.Unmarshal(responseBody, &chatResponse)
 	if err != nil {
-		log.Printf("❌ Failed to unmarshal response: %v", err)
-		log.Printf("❌ Response body was: %s", string(responseBody))
-		return "", fmt.Errorf("failed to unmarshal response: %v", err)
+		return "", fmt.Errorf("failed to unmarshal OpenAI response: %w", err)
 	}
-
-	log.Printf("🔍 Parsed response: %+v", chatResponse)
-	log.Printf("🔍 Number of choices: %d", len(chatResponse.Choices))
 
 	// Return the content of the first choice
 	if len(chatResponse.Choices) > 0 {
-		content := chatResponse.Choices[0].Message.Content
-		log.Printf("✅ Extracted content: '%s'", content)
-		return content, nil
+		return chatResponse.Choices[0].Message.Content, nil
 	}
 
-	log.Printf("❌ No choices found in response")
 	return "", fmt.Errorf("no response received from ChatGPT API")
 }

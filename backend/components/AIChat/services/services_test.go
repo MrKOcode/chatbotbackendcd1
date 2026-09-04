@@ -237,6 +237,51 @@ func TestGetConversation(t *testing.T) {
 	}
 }
 
+func TestConversationMemoryAndStudentProfile(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Nanosecond)
+	client := &fakeDynamo{getOutput: &ddb.GetItemOutput{Item: map[string]types.AttributeValue{
+		"summary": avs("covered fractions"), "summarizedThrough": avs(now.Format(time.RFC3339Nano)),
+		"version": &types.AttributeValueMemberN{Value: "2"}, "updatedAt": avs(now.Format(time.RFC3339Nano)),
+	}}}
+	dal := testDAL(client)
+	memory, err := dal.GetConversationMemory(context.Background(), "c1")
+	if err != nil || memory.Summary != "covered fractions" || memory.Version != 2 {
+		t.Fatalf("memory=%+v err=%v", memory, err)
+	}
+	if err := dal.PutConversationMemory(context.Background(), ConversationMemory{ConversationID: "c1", Summary: "new", SummarizedThrough: now, Version: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if attrS(client.putInputs[0].Item, "SK") != skMemory() || attrInt(client.putInputs[0].Item, "version") != 3 {
+		t.Fatalf("unexpected memory item: %+v", client.putInputs[0].Item)
+	}
+
+	client.getOutput = &ddb.GetItemOutput{Item: map[string]types.AttributeValue{
+		"courses": stringList([]string{"Math"}), "goals": stringList([]string{"pass exam"}), "updatedAt": avs(now.Format(time.RFC3339Nano)),
+	}}
+	profile, err := dal.GetStudentProfile(context.Background(), "u1")
+	if err != nil || len(profile.Courses) != 1 || profile.Courses[0] != "Math" {
+		t.Fatalf("profile=%+v err=%v", profile, err)
+	}
+	if err := dal.PutStudentProfile(context.Background(), StudentProfile{UserID: "u1", Strengths: []string{"factoring"}}); err != nil {
+		t.Fatal(err)
+	}
+	if attrS(client.putInputs[1].Item, "SK") != skProfile() || len(attrStrings(client.putInputs[1].Item, "strengths")) != 1 {
+		t.Fatalf("unexpected profile item: %+v", client.putInputs[1].Item)
+	}
+}
+
+func TestEmptyMemoryRecordsAreDefaults(t *testing.T) {
+	dal := testDAL(&fakeDynamo{})
+	memory, err := dal.GetConversationMemory(context.Background(), "c1")
+	if err != nil || memory.ConversationID != "c1" || memory.Summary != "" {
+		t.Fatalf("memory=%+v err=%v", memory, err)
+	}
+	profile, err := dal.GetStudentProfile(context.Background(), "u1")
+	if err != nil || profile.UserID != "u1" {
+		t.Fatalf("profile=%+v err=%v", profile, err)
+	}
+}
+
 func TestDeleteConversationCascade(t *testing.T) {
 	var items []map[string]types.AttributeValue
 	for i := 0; i < 30; i++ {
@@ -313,6 +358,9 @@ func TestGetChatGPTResponse(t *testing.T) {
 			if (err != nil) != tt.wantErr || got != tt.want {
 				t.Fatalf("response=%q err=%v", got, err)
 			}
+			if tt.name == "API error" && strings.Contains(err.Error(), "limited") {
+				t.Fatalf("provider response body leaked through error: %v", err)
+			}
 		})
 	}
 	t.Run("transport error", func(t *testing.T) {
@@ -325,4 +373,22 @@ func TestGetChatGPTResponse(t *testing.T) {
 			t.Fatal("expected transport error")
 		}
 	})
+}
+
+func TestEstimateTokensAndGenerateMemory(t *testing.T) {
+	if EstimateTokens("") != 0 || EstimateTokens("123456") != 2 {
+		t.Fatal("unexpected token estimate")
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"{\"summary\":\"learned algebra\",\"courses\":[\"Math\"],\"goals\":[],\"strengths\":[],\"misconceptions\":[],\"preferences\":[]}"}}]}`))
+	}))
+	defer server.Close()
+	oldURL, oldClient := chatGPTAPIURL, chatGPTHTTPClient
+	chatGPTAPIURL, chatGPTHTTPClient = server.URL, server.Client()
+	t.Cleanup(func() { chatGPTAPIURL, chatGPTHTTPClient = oldURL, oldClient })
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	update, err := GenerateMemory("", StudentProfile{UserID: "u1"}, []ChatMessage{{Role: "user", Content: "Teach algebra"}})
+	if err != nil || update.Summary != "learned algebra" || len(update.Courses) != 1 {
+		t.Fatalf("update=%+v err=%v", update, err)
+	}
 }
