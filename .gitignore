@@ -71,7 +71,7 @@ node_modules/
 
 #codex
 .codex-go-cache/
-
+.codex
 
 #aws
 backend/aws/
