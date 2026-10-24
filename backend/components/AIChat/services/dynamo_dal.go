@@ -451,16 +451,26 @@ func (d *dynamoDAL) PutConversationMemory(ctx context.Context, memory Conversati
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	_, err := d.client.PutItem(ctx, &ddb.PutItemInput{TableName: aws.String(d.table), Item: map[string]types.AttributeValue{
-		"PK":                &types.AttributeValueMemberS{Value: pkConv(memory.ConversationID)},
-		"SK":                &types.AttributeValueMemberS{Value: skMemory()},
-		"entityType":        &types.AttributeValueMemberS{Value: entityMemory},
-		"conversationId":    &types.AttributeValueMemberS{Value: memory.ConversationID},
-		"summary":           &types.AttributeValueMemberS{Value: memory.Summary},
-		"summarizedThrough": &types.AttributeValueMemberS{Value: memory.SummarizedThrough.UTC().Format(time.RFC3339Nano)},
-		"version":           &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", memory.Version)},
-		"updatedAt":         &types.AttributeValueMemberS{Value: now.Format(time.RFC3339Nano)},
-	}})
+	_, err := d.client.PutItem(ctx, &ddb.PutItemInput{
+		TableName:           aws.String(d.table),
+		ConditionExpression: aws.String("#version =: expectedVersion"),
+		ExpressionAttributeNames: map[string]string{
+			"#version": "version",
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":expectedVersion": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", memory.Version-1)},
+		},
+
+		Item: map[string]types.AttributeValue{
+			"PK":                &types.AttributeValueMemberS{Value: pkConv(memory.ConversationID)},
+			"SK":                &types.AttributeValueMemberS{Value: skMemory()},
+			"entityType":        &types.AttributeValueMemberS{Value: entityMemory},
+			"conversationId":    &types.AttributeValueMemberS{Value: memory.ConversationID},
+			"summary":           &types.AttributeValueMemberS{Value: memory.Summary},
+			"summarizedThrough": &types.AttributeValueMemberS{Value: memory.SummarizedThrough.UTC().Format(time.RFC3339Nano)},
+			"version":           &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", memory.Version)},
+			"updatedAt":         &types.AttributeValueMemberS{Value: now.Format(time.RFC3339Nano)},
+		}})
 	return err
 }
 
