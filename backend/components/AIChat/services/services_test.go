@@ -237,6 +237,29 @@ func TestGetConversation(t *testing.T) {
 	}
 }
 
+func TestPutConversationMemoryRequiresVersionCondition(t *testing.T) {
+	client := &fakeDynamo{}
+
+	err := testDAL(client).PutConversationMemory(
+		context.Background(),
+		ConversationMemory{ConversationID: "c1", Version: 3},
+	)
+
+	if err != nil {
+		t.Fatal(err)
+
+	}
+
+	if len(client.putInputs) != 1 {
+		t.Fatalf("expected one write, got %d", len(client.putInputs))
+
+	}
+
+	if client.putInputs[0].ConditionExpression == nil {
+		t.Fatal("missing version condition")
+	}
+}
+
 func TestConversationMemoryAndStudentProfile(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Nanosecond)
 	client := &fakeDynamo{getOutput: &ddb.GetItemOutput{Item: map[string]types.AttributeValue{
