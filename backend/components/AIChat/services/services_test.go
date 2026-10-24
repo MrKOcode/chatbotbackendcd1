@@ -284,13 +284,37 @@ func TestPutConversationMemoryChecksPreviousVersion(t *testing.T) {
 		t.Fatal("expected #version to reference the version attribute")
 	}
 
-	expected, ok := input.ExpressionAttributeValues[":expectedVersion"].
-		(*types.AttributeValueMemberN)
+	expected, ok := input.ExpressionAttributeValues[":expectedVersion"].(*types.AttributeValueMemberN)
 	if !ok || expected.Value != "2" {
 		t.Fatalf("expected previous version 2, got %#v", expected)
 	}
 	if attrInt(input.Item, "version") != 3 {
 		t.Fatal("expected the new version to be 3")
+	}
+}
+
+func TestPutConversationMemoryFirstVersionRequiresMissingItem(t *testing.T) {
+	client := &fakeDynamo{}
+
+	err := testDAL(client).PutConversationMemory(
+		context.Background(),
+		ConversationMemory{ConversationID: "c1", Version: 1},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(client.putInputs) != 1 {
+		t.Fatalf("expected one write, got %d", len(client.putInputs))
+	}
+
+	input := client.putInputs[0]
+	if input.ConditionExpression == nil ||
+		*input.ConditionExpression != "attribute_not_exists(PK)" {
+		t.Fatal("first memory write must require that the item does not exist")
+	}
+	if len(input.ExpressionAttributeNames) != 0 ||
+		len(input.ExpressionAttributeValues) != 0 {
+		t.Fatal("first memory write must not include unused expression placeholders")
 	}
 }
 
