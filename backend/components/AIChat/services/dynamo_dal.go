@@ -453,7 +453,7 @@ func (d *dynamoDAL) PutConversationMemory(ctx context.Context, memory Conversati
 	}
 	_, err := d.client.PutItem(ctx, &ddb.PutItemInput{
 		TableName:           aws.String(d.table),
-		ConditionExpression: aws.String("#version =: expectedVersion"),
+		ConditionExpression: aws.String("#version = :expectedVersion"),
 		ExpressionAttributeNames: map[string]string{
 			"#version": "version",
 		},

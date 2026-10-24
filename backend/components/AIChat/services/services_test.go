@@ -260,7 +260,7 @@ func TestPutConversationMemoryRequiresVersionCondition(t *testing.T) {
 	}
 }
 
-func TestPutConversationMmemoryChecksPreviousVersion(t *testing.T) {
+func TestPutConversationMemoryChecksPreviousVersion(t *testing.T) {
 	client := &fakeDynamo{}
 
 	err := testDAL(client).PutConversationMemory(
@@ -273,20 +273,21 @@ func TestPutConversationMmemoryChecksPreviousVersion(t *testing.T) {
 	if len(client.putInputs) != 1 {
 		t.Fatalf("expected one write, got %d", len(client.putInputs))
 	}
+
 	input := client.putInputs[0]
 
 	if input.ConditionExpression == nil ||
-		*input.ConditionExpression != "#version =: expectedVersion" {
-		t.Fatal("exptected a condition comparing the stored version")
+		*input.ConditionExpression != "#version = :expectedVersion" {
+		t.Fatal("expected a condition comparing the stored version")
 	}
-
 	if input.ExpressionAttributeNames["#version"] != "version" {
 		t.Fatal("expected #version to reference the version attribute")
 	}
 
-	expected, ok := input.ExpressionAttributeValues[":expectedVersion"].(*types.AttributeValueMemberN)
+	expected, ok := input.ExpressionAttributeValues[":expectedVersion"].
+		(*types.AttributeValueMemberN)
 	if !ok || expected.Value != "2" {
-		t.Fatalf("expected :expectedVersion to be 2, got %v", expected)
+		t.Fatalf("expected previous version 2, got %#v", expected)
 	}
 	if attrInt(input.Item, "version") != 3 {
 		t.Fatal("expected the new version to be 3")
