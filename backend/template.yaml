@@ -32,6 +32,10 @@ Parameters:
   OpenAISecretId:
     Type: String
     Default: mychatbot/openai
+  OpenAIModel:
+    Type: String
+    Default: gpt-6-luna
+    Description: OpenAI model used for chat replies and conversation memory
 
 Globals:
   Function:
@@ -179,6 +183,7 @@ Resources:
           API_STAGE_NAME: !Ref ApiStageName
           ALLOWED_ORIGIN: !Ref AllowedCorsOrigin
           OPENAI_API_KEY: !Sub "{{resolve:secretsmanager:${OpenAISecretId}:SecretString:OPENAI_API_KEY}}"
+          OPENAI_MODEL: !Ref OpenAIModel
       Events:
         AIchatApi:
           Type: Api

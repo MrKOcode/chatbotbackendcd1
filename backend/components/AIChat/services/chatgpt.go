@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 )
 
 // Structs to represent request and response payloads
@@ -41,8 +42,12 @@ func GetChatGPTResponse(messages []Message) (string, error) {
 
 	// OpenAI API URL
 	// Construct the request payload
+	model := strings.TrimSpace(os.Getenv("OPENAI_MODEL"))
+	if model == "" {
+		model = "gpt-6-luna"
+	}
 	requestPayload := ChatGPTRequest{
-		Model:    "gpt-4",
+		Model:    model,
 		Messages: messages,
 	}
 
