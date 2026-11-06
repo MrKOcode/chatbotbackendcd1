@@ -113,6 +113,7 @@ The SAM template accepts the following parameters. Override them at deploy time 
 | `ApiStageName` | `Prod` | API Gateway stage |
 | `AllowedCorsOrigin` | deployed frontend URL | Browser origin allowed by API Gateway |
 | `OpenAISecretId` | `mychatbot/openai` | Secrets Manager secret containing the API key |
+| `OpenAIModel` | `gpt-6-luna` | Model for chat replies and conversation memory |
 
 Create the OpenAI secret before deploying. The secret value must be a JSON object with an `OPENAI_API_KEY` field:
 
@@ -123,7 +124,7 @@ aws secretsmanager create-secret `
   --region us-west-2
 ```
 
-Do not commit API keys or `.env` files. At runtime, SAM injects `TABLE_NAME`, Cognito values, `API_STAGE_NAME`, `ALLOWED_ORIGIN`, and the resolved `OPENAI_API_KEY` into the Lambda functions.
+Do not commit API keys or `.env` files. At runtime, SAM injects `TABLE_NAME`, Cognito values, `API_STAGE_NAME`, `ALLOWED_ORIGIN`, `OPENAI_MODEL`, and the resolved `OPENAI_API_KEY` into the Lambda functions.
 
 ## Build and test
 
@@ -180,7 +181,8 @@ Pagination tokens are base64-encoded DynamoDB `LastEvaluatedKey` values.
 
 ## Operational notes
 
-- The deployed AI client currently calls the OpenAI Chat Completions endpoint with the `gpt-4` model identifier.
+- The AI client calls OpenAI Chat Completions using `OPENAI_MODEL`, defaulting to `gpt-6-luna` when unset or blank. SAM sets this variable from the `OpenAIModel` parameter. Both chat replies and memory generation use this model. Deploy the rebuilt backend to apply the migration from retired `gpt-4`; changing only an environment variable on an older binary that hardcodes the model will not fix it.
+- Unit tests mock OpenAI. Before production rollout, verify model access with the deployment API account and smoke-test a chat reply and memory generation.
 - The Cognito pre-sign-up trigger automatically confirms users and verifies their email. Review this behavior before using the stack in a production environment.
 - `backend/samconfig.toml` contains environment-specific names and a fixed AWS region; adjust these for additional environments.
 - Legacy local-service helper scripts remain under `backend/`, but the supported build and runtime path described here is AWS SAM.

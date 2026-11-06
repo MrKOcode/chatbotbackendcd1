@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -311,6 +312,7 @@ func TestDeleteConversationCascade(t *testing.T) {
 }
 
 func TestGetChatGPTResponse(t *testing.T) {
+	t.Setenv("OPENAI_MODEL", "")
 	t.Run("missing key", func(t *testing.T) {
 		t.Setenv("OPENAI_API_KEY", "")
 		if _, err := GetChatGPTResponse([]Message{{Role: "user", Content: "hello"}}); err == nil {
@@ -339,7 +341,8 @@ func TestGetChatGPTResponse(t *testing.T) {
 					body, _ := io.ReadAll(r.Body)
 					payload := string(body)
 					if !strings.Contains(payload, `"role":"user","content":"question"`) ||
-						!strings.Contains(payload, `"role":"assistant","content":"previous answer"`) {
+						!strings.Contains(payload, `"role":"assistant","content":"previous answer"`) ||
+						!strings.Contains(payload, `"model":"gpt-6-luna"`) {
 						t.Errorf("unexpected payload: %s", body)
 					}
 				}
@@ -373,6 +376,36 @@ func TestGetChatGPTResponse(t *testing.T) {
 			t.Fatal("expected transport error")
 		}
 	})
+}
+
+func TestChatModelConfiguration(t *testing.T) {
+	for _, tt := range []struct{ name, configured, want string }{
+		{"default", "", "gpt-6-luna"},
+		{"whitespace", "   ", "gpt-6-luna"},
+		{"override", " custom-model ", "custom-model"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("OPENAI_API_KEY", "test-key")
+			t.Setenv("OPENAI_MODEL", tt.configured)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var request ChatGPTRequest
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Error(err)
+				}
+				if request.Model != tt.want || len(request.Messages) != 1 || request.Messages[0].Content != "hello" {
+					t.Errorf("unexpected request: %+v", request)
+				}
+				_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"answer"}}]}`))
+			}))
+			defer server.Close()
+			oldURL, oldClient := chatGPTAPIURL, chatGPTHTTPClient
+			chatGPTAPIURL, chatGPTHTTPClient = server.URL, server.Client()
+			t.Cleanup(func() { chatGPTAPIURL, chatGPTHTTPClient = oldURL, oldClient })
+			if answer, err := GetChatGPTResponse([]Message{{Role: "user", Content: "hello"}}); err != nil || answer != "answer" {
+				t.Fatalf("answer=%q err=%v", answer, err)
+			}
+		})
+	}
 }
 
 func TestEstimateTokensAndGenerateMemory(t *testing.T) {
